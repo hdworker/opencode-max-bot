@@ -64,8 +64,7 @@ User=dev
 Group=dev
 WorkingDirectory=$APP_DIR
 EnvironmentFile=$ENV_FILE
-Environment=OPENCODE_AUTO_RESTART_ENABLED=false
-ExecStart=$NODE_BIN $APP_DIR/dist/index.js
+ExecStart=/usr/bin/env OPENCODE_AUTO_RESTART_ENABLED=false $NODE_BIN $APP_DIR/dist/index.js
 Restart=on-failure
 RestartSec=5
 
@@ -74,15 +73,17 @@ WantedBy=multi-user.target
 UNIT
 
 systemctl daemon-reload
-systemctl enable --now opencode.service
+systemctl enable opencode.service
+systemctl restart opencode.service
 for attempt in 1 2 3 4 5 6 7 8 9 10; do
-  if curl --fail --silent http://127.0.0.1:4096/global/health >/dev/null; then
+  if curl --max-time 10 --fail --silent http://127.0.0.1:4096/global/health >/dev/null; then
     break
   fi
   sleep 2
 done
-curl --fail --silent http://127.0.0.1:4096/global/health
-systemctl enable --now opencode-max-bot.service
+curl --max-time 10 --fail --silent http://127.0.0.1:4096/global/health
+systemctl enable opencode-max-bot.service
+systemctl restart opencode-max-bot.service
 systemctl is-active --quiet opencode.service
 systemctl is-active --quiet opencode-max-bot.service
 systemctl --no-pager --full status opencode.service opencode-max-bot.service
