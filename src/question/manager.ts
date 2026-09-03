@@ -24,14 +24,10 @@ interface ActiveQuestion {
 }
 
 class QuestionManager {
-  private active: ActiveQuestion | null = null;
+  private active = new Map<number, ActiveQuestion>();
 
-  start(
-    questions: Question[],
-    requestID: string,
-    sessionId: string,
-  ): void {
-    this.active = {
+  start(chatId: number, questions: Question[], requestID: string, sessionId: string): void {
+    this.active.set(chatId, {
       questions,
       currentIndex: 0,
       selectedOptions: new Map(),
@@ -39,27 +35,28 @@ class QuestionManager {
       requestID,
       sessionId,
       messageIds: [],
-    };
+    });
   }
 
-  isActive(): boolean {
-    return this.active !== null;
+  isActive(chatId: number): boolean {
+    return this.active.has(chatId);
   }
 
-  getActive(): ActiveQuestion | null {
-    return this.active;
+  getActive(chatId: number): ActiveQuestion | null {
+    return this.active.get(chatId) ?? null;
   }
 
-  getCurrentQuestion(): Question | null {
-    if (!this.active) return null;
-    return this.active.questions[this.active.currentIndex] ?? null;
+  getCurrentQuestion(chatId: number): Question | null {
+    const active = this.active.get(chatId);
+    return active?.questions[active.currentIndex] ?? null;
   }
 
-  selectOption(questionIndex: number, optionValue: string): void {
-    if (!this.active) return;
+  selectOption(chatId: number, questionIndex: number, optionValue: string): void {
+    const active = this.active.get(chatId);
+    if (!active) return;
 
-    const existing = this.active.selectedOptions.get(questionIndex) ?? [];
-    const question = this.active.questions[questionIndex];
+    const existing = active.selectedOptions.get(questionIndex) ?? [];
+    const question = active.questions[questionIndex];
 
     if (question?.multiple) {
       const idx = existing.indexOf(optionValue);
@@ -68,44 +65,63 @@ class QuestionManager {
       } else {
         existing.push(optionValue);
       }
-      this.active.selectedOptions.set(questionIndex, existing);
+      active.selectedOptions.set(questionIndex, existing);
     } else {
-      this.active.selectedOptions.set(questionIndex, [optionValue]);
+      active.selectedOptions.set(questionIndex, [optionValue]);
     }
   }
 
-  setCustomAnswer(questionIndex: number, answer: string): void {
-    if (!this.active) return;
-    this.active.customAnswers.set(questionIndex, answer);
+  setCustomAnswer(chatId: number, questionIndex: number, answer: string): void {
+    this.active.get(chatId)?.customAnswers.set(questionIndex, answer);
   }
 
-  nextQuestion(): boolean {
-    if (!this.active) return false;
-    if (this.active.currentIndex < this.active.questions.length - 1) {
-      this.active.currentIndex++;
+  nextQuestion(chatId: number): boolean {
+    const active = this.active.get(chatId);
+    if (!active) return false;
+    if (active.currentIndex < active.questions.length - 1) {
+      active.currentIndex++;
       return true;
     }
     return false;
   }
 
-  addMessageId(messageId: number): void {
-    this.active?.messageIds.push(messageId);
+  addMessageId(chatId: number, messageId: number): void {
+    this.active.get(chatId)?.messageIds.push(messageId);
   }
 
-  getMessageIds(): number[] {
-    return this.active?.messageIds ?? [];
+  getMessageIds(chatId: number): number[] {
+    return this.active.get(chatId)?.messageIds ?? [];
   }
 
-  getSelectedOptions(): Map<number, string[]> {
-    return this.active?.selectedOptions ?? new Map();
+  getSelectedOptions(chatId: number): Map<number, string[]> {
+    return this.active.get(chatId)?.selectedOptions ?? new Map();
   }
 
-  getCustomAnswers(): Map<number, string> {
-    return this.active?.customAnswers ?? new Map();
+  getCustomAnswers(chatId: number): Map<number, string> {
+    return this.active.get(chatId)?.customAnswers ?? new Map();
   }
 
-  clear(): void {
-    this.active = null;
+  getRequestId(chatId: number): string | null {
+    return this.active.get(chatId)?.requestID ?? null;
+  }
+
+  getCurrentIndex(chatId: number): number {
+    return this.active.get(chatId)?.currentIndex ?? 0;
+  }
+
+  getAnswers(chatId: number): string[][] {
+    const active = this.active.get(chatId);
+    if (!active) return [];
+
+    return active.questions.map((_, index) => {
+      const customAnswer = active.customAnswers.get(index);
+      if (customAnswer !== undefined) return [customAnswer];
+      return active.selectedOptions.get(index) ?? [];
+    });
+  }
+
+  clear(chatId: number): void {
+    this.active.delete(chatId);
   }
 }
 

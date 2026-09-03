@@ -4,13 +4,13 @@ import type {
   MaxUpdate,
   MaxMessage,
   MaxCallback,
-  MaxUser,
   InlineKeyboardAttachment,
   KeyboardButton,
   Attachment,
   SendMessageBody,
 } from "./client.js";
 import { maxClient } from "./client.js";
+import { MaxTransport, normalizeMaxUpdate } from "./transport.js";
 
 export type UpdateHandler = (update: MaxUpdate) => void | Promise<void>;
 
@@ -28,6 +28,8 @@ export type CallbackHandler = (
   data: string,
   callback: MaxCallback,
 ) => void | Promise<void>;
+
+export type CallbackMatcher = string | ((payload: string) => boolean);
 
 export type MessageHandler = (
   userId: number,
@@ -49,8 +51,10 @@ class MaxBot {
   private commandHandlers = new Map<string, CommandHandler>();
   private messageHandlers: MessageHandler[] = [];
   private callbackHandlers: CallbackHandler[] = [];
+  private callbackRoutes: Array<{ matcher: CallbackMatcher; handler: CallbackHandler }> = [];
   private updateHandlers: UpdateHandler[] = [];
   private authUserId: number;
+  private transport = new MaxTransport();
 
   constructor() {
     this.authUserId = config.max.allowedUserId;
@@ -72,6 +76,11 @@ class MaxBot {
     return this;
   }
 
+  callback(matcher: CallbackMatcher, handler: CallbackHandler): this {
+    this.callbackRoutes.push({ matcher, handler });
+    return this;
+  }
+
   onUpdate(handler: UpdateHandler): this {
     this.updateHandlers.push(handler);
     return this;
@@ -87,34 +96,32 @@ class MaxBot {
         await handler(update);
       }
 
-      switch (update.update_type) {
-        case "message_created": {
-          const message = update.message;
-          if (!message) return;
+      const inbound = normalizeMaxUpdate(update);
+      if (!inbound) return;
 
-          const sender = message.sender;
-          if (!sender || sender.is_bot) return;
+      if (!this.isAuthorized(inbound.address.userId)) {
+        logger.warn(
+          `[Bot] Ignoring ${inbound.kind} from unauthorized user ${inbound.address.userId}`,
+        );
+        return;
+      }
 
-          const userId = sender.user_id;
-          const chatId = message.recipient.chat_id ?? 0;
-
-          if (!this.isAuthorized(userId)) {
-            logger.debug(`[Bot] Ignoring message from unauthorized user ${userId}`);
-            return;
-          }
-
-          const text = message.body?.text ?? "";
+      switch (inbound.kind) {
+        case "message": {
+          const { userId, chatId } = inbound.address;
+          const { text, message } = inbound;
 
           logger.debug(`[Bot] Message text: "${text}" (length: ${text.length})`);
 
           if (text.startsWith("/")) {
             const spaceIndex = text.indexOf(" ");
-            const commandName =
-              spaceIndex > 0 ? text.slice(1, spaceIndex) : text.slice(1);
+            const commandName = spaceIndex > 0 ? text.slice(1, spaceIndex) : text.slice(1);
             const args = spaceIndex > 0 ? text.slice(spaceIndex + 1) : "";
 
             logger.debug(`[Bot] Command parsed: name="${commandName}", args="${args}"`);
-            logger.debug(`[Bot] Registered commands: ${Array.from(this.commandHandlers.keys()).join(", ")}`);
+            logger.debug(
+              `[Bot] Registered commands: ${Array.from(this.commandHandlers.keys()).join(", ")}`,
+            );
 
             const handler = this.commandHandlers.get(commandName);
             if (handler) {
@@ -133,40 +140,31 @@ class MaxBot {
           break;
         }
 
-        case "message_callback": {
-          const callback = update.callback;
-          if (!callback) return;
+        case "callback": {
+          const { userId, chatId } = inbound.address;
+          const { callback, payload } = inbound;
+          logger.info(`[Bot] Callback event: user=${userId}, chat=${chatId}, payload="${payload}"`);
 
-          const sender = update.user;
-          const userId = sender?.user_id ?? 0;
-          const chatId = callback.message?.recipient?.chat_id ?? 0;
-
-          if (!this.isAuthorized(userId)) {
-            logger.debug(`[Bot] Ignoring callback from unauthorized user ${userId}`);
+          const route = this.callbackRoutes.find(({ matcher }) =>
+            typeof matcher === "string" ? payload.startsWith(matcher) : matcher(payload),
+          );
+          if (route) {
+            await route.handler(userId, chatId, payload, callback);
             return;
           }
 
-          logger.debug(`[Bot] Callback received: payload="${callback.payload}", callback_id="${callback.callback_id}"`);
-
           for (const handler of this.callbackHandlers) {
-            await handler(userId, chatId, callback.payload, callback);
+            await handler(userId, chatId, payload, callback);
           }
           break;
         }
 
         case "bot_started": {
-          const user = update.user;
-          if (!user) return;
-
-          const userId = user.user_id;
-          if (!this.isAuthorized(userId)) {
-            logger.debug(`[Bot] Ignoring start from unauthorized user ${userId}`);
-            return;
-          }
+          const { userId, chatId } = inbound.address;
 
           const startHandler = this.commandHandlers.get("start");
           if (startHandler) {
-            await startHandler(userId, userId, "/start", "", {
+            await startHandler(userId, chatId, "/start", "", {
               message_id: "",
               recipient: { chat_id: userId, chat_type: "dialog" },
               body: { mid: "", seq: 0, text: "/start" },
@@ -182,7 +180,7 @@ class MaxBot {
   }
 
   async sendMessage(userId: number, body: SendMessageBody): Promise<MaxMessage> {
-    return maxClient.sendMessage(userId, body);
+    return this.transport.reply({ chatId: userId, userId }, body);
   }
 
   async editMessage(messageId: string, body: Partial<SendMessageBody>): Promise<MaxMessage> {
@@ -198,7 +196,7 @@ class MaxBot {
     notification?: string,
     message?: { text?: string; format?: "markdown" | "html"; attachments?: Attachment[] },
   ): Promise<void> {
-    return maxClient.answerCallback(callbackId, notification, message);
+    return this.transport.acknowledge(callbackId, notification, message);
   }
 
   async start(): Promise<void> {
@@ -225,7 +223,9 @@ class MaxBot {
         logger.debug(`[Bot] Polling with marker=${this.marker ?? "none"}`);
         const response = await maxClient.getUpdates(this.marker, 30);
 
-        logger.debug(`[Bot] Got ${response.updates?.length ?? 0} updates, marker=${response.marker ?? "none"}`);
+        logger.debug(
+          `[Bot] Got ${response.updates?.length ?? 0} updates, marker=${response.marker ?? "none"}`,
+        );
 
         if (response.marker) {
           this.marker = response.marker;

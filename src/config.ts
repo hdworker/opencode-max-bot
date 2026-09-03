@@ -6,6 +6,7 @@ export const config = {
   max: {
     token: process.env.MAX_TOKEN || "",
     allowedUserId: Number(process.env.MAX_ALLOWED_USER_ID) || 0,
+    apiUrl: process.env.MAX_API_URL || "https://platform-api.max.ru",
   },
   opencode: {
     apiUrl: process.env.OPENCODE_API_URL || "http://localhost:4096",
@@ -15,13 +16,9 @@ export const config = {
     monitorIntervalSec: Number(process.env.OPENCODE_MONITOR_INTERVAL_SEC) || 30,
   },
   server: {
-    logLevel: (process.env.LOG_LEVEL || "info") as
-      | "debug"
-      | "info"
-      | "warn"
-      | "error",
+    logLevel: (process.env.LOG_LEVEL || "info") as "debug" | "info" | "warn" | "error",
   },
   bot: {
-    locale: process.env.OPENCODE_LOCALE || "en",
+    locale: process.env.OPENCODE_LOCALE || "ru",
   },
 } as const;

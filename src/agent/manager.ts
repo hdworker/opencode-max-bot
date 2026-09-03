@@ -1,6 +1,8 @@
-import { opencodeClient } from "../opencode/client.js";
 import { logger } from "../utils/logger.js";
 import { settingsManager } from "../settings/manager.js";
+import { projectManager } from "../project/manager.js";
+import { conversationContext } from "../conversation/context.js";
+import { openCodeWorkspace } from "../opencode/workspace.js";
 
 export interface AgentInfo {
   name: string;
@@ -8,43 +10,32 @@ export interface AgentInfo {
 }
 
 class AgentManager {
-  private agents: AgentInfo[] = [];
-  private currentAgent: string | null = null;
+  private agents = new Map<number, AgentInfo[]>();
 
-  async loadAgents(): Promise<void> {
+  async loadAgents(chatId?: number): Promise<void> {
     try {
-      const { data, error } = await opencodeClient.app.agents();
-
-      if (error) {
-        throw error;
-      }
-
-      const agentList = data ?? [];
-      this.agents = [];
-
-      for (const agent of agentList) {
-        this.agents.push({
-          name: agent.name ?? "",
-          description: agent.description,
-        });
-      }
-
-      this.currentAgent = settingsManager.getCurrentAgent();
+      this.agents.set(
+        chatId ?? 0,
+        await openCodeWorkspace.listAgents(projectManager.getCurrentProjectDirectory(chatId)),
+      );
     } catch (error) {
       logger.error("[AgentManager] Failed to load agents:", error);
     }
   }
 
-  getAgents(): AgentInfo[] {
-    return this.agents;
+  getAgents(chatId?: number): AgentInfo[] {
+    return this.agents.get(chatId ?? 0) ?? [];
   }
 
-  getCurrentAgent(): string | null {
-    return this.currentAgent;
+  getCurrentAgent(chatId?: number): string | null {
+    return chatId === undefined ? settingsManager.getCurrentAgent() : conversationContext.get(chatId).agent;
   }
 
-  setCurrentAgent(agentName: string | null): void {
-    this.currentAgent = agentName;
+  setCurrentAgent(agentName: string | null, chatId?: number): void {
+    if (chatId !== undefined) {
+      conversationContext.setAgent(chatId, agentName);
+      return;
+    }
     settingsManager.setCurrentAgent(agentName);
   }
 }

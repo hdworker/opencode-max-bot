@@ -9,6 +9,9 @@ import { getRuntimeMode } from "../runtime/mode.js";
 import { getRuntimePaths } from "../runtime/paths.js";
 import { initializeLogger, logger } from "../utils/logger.js";
 import { safeBackgroundTask } from "../utils/safe-background-task.js";
+import { setLocale } from "../i18n/index.js";
+import { stopMaxEventSubscription } from "../max/event-handler.js";
+import { SingleInstanceLock } from "../runtime/single-instance.js";
 
 // Command registrations
 import { registerStartCommand } from "../max/commands/start.js";
@@ -17,7 +20,10 @@ import { registerStatusCommand } from "../max/commands/status.js";
 import { registerNewCommand } from "../max/commands/new.js";
 import { registerAbortCommand } from "../max/commands/abort.js";
 import { registerSessionsCommand } from "../max/commands/sessions.js";
-import { registerProjectsCommand, registerProjectSelectCallback } from "../max/commands/projects.js";
+import {
+  registerProjectsCommand,
+  registerProjectSelectCallback,
+} from "../max/commands/projects.js";
 import { registerRenameCommand } from "../max/commands/rename.js";
 import { registerDetachCommand } from "../max/commands/detach.js";
 import { registerTtsCommand } from "../max/commands/tts.js";
@@ -55,9 +61,14 @@ async function getBotVersion(): Promise<string> {
 export async function startBotApp(): Promise<void> {
   await initializeLogger();
 
+  const instanceLock = new SingleInstanceLock();
+  instanceLock.acquire();
+
   const mode = getRuntimeMode();
   const runtimePaths = getRuntimePaths();
   const version = await getBotVersion();
+
+  setLocale(config.bot.locale);
 
   logger.info(`Starting OpenCode MAX Bot v${version}...`);
   logger.info(`Config loaded from ${runtimePaths.envFilePath}`);
@@ -114,6 +125,7 @@ export async function startBotApp(): Promise<void> {
     shutdownStarted = true;
     logger.info(`[App] Received ${signal}, shutting down...`);
     opencodeAutoRestartService.stop();
+    stopMaxEventSubscription();
 
     shutdownTimeout = setTimeout(() => {
       logger.warn(`[App] Shutdown did not finish in ${SHUTDOWN_TIMEOUT_MS}ms, forcing exit.`);
@@ -143,5 +155,7 @@ export async function startBotApp(): Promise<void> {
       shutdownTimeout = null;
     }
     opencodeAutoRestartService.stop();
+    stopMaxEventSubscription();
+    instanceLock.release();
   }
 }

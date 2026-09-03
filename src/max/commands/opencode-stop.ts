@@ -1,6 +1,10 @@
 import type { MaxBot } from "../bot.js";
 import { logger } from "../../utils/logger.js";
-import { resolveLocalOpencodeTarget, findServerPid, killServerProcess } from "../../opencode/process.js";
+import {
+  resolveLocalOpencodeTarget,
+  findServerPid,
+  killServerProcess,
+} from "../../opencode/process.js";
 import { config } from "../../config.js";
 
 export function registerOpencodeStopCommand(bot: MaxBot): void {

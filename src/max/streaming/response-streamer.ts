@@ -28,12 +28,15 @@ export class ResponseStreamer {
     const now = Date.now();
     if (now - this.lastStreamTime < STREAM_THROTTLE_MS) {
       if (!this.flushTimer) {
-        this.flushTimer = setTimeout(() => {
-          this.flush(chatId).catch((error) => {
-            logger.error("[Streamer] Flush error:", error);
-          });
-          this.flushTimer = null;
-        }, STREAM_THROTTLE_MS - (now - this.lastStreamTime));
+        this.flushTimer = setTimeout(
+          () => {
+            this.flush(chatId).catch((error) => {
+              logger.error("[Streamer] Flush error:", error);
+            });
+            this.flushTimer = null;
+          },
+          STREAM_THROTTLE_MS - (now - this.lastStreamTime),
+        );
       }
       return;
     }

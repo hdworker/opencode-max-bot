@@ -8,7 +8,7 @@ export function registerStartCommand(bot: MaxBot): void {
   bot.command("start", "Start the bot", async (userId, chatId) => {
     try {
       const project = settingsManager.getCurrentProject();
-      const session = sessionManager.getCurrentSession();
+      const session = sessionManager.getCurrentSession(chatId);
 
       let text = "🤖 **OpenCode MAX Bot**\n\n";
       text += "Ready to help with coding tasks.\n\n";
@@ -22,10 +22,10 @@ export function registerStartCommand(bot: MaxBot): void {
 
       text += "\nType /help to see available commands.";
 
-      await bot.sendMessage(userId, { text, format: "markdown" });
+      await bot.sendMessage(chatId, { text, format: "markdown" });
     } catch (error) {
       logger.error("[Start] Error:", error);
-      await bot.sendMessage(userId, { text: "Error initializing bot." });
+      await bot.sendMessage(chatId, { text: "Error initializing bot." });
     }
   });
 }

@@ -7,9 +7,20 @@ export interface SettingsData {
   currentSession: string | null;
   currentAgent: string | null;
   currentModel: string | null;
+  currentVariant: string | null;
   pinnedMessageId: number | null;
   ttsEnabled: boolean;
   sessionDirectoryCache: Map<string, string>;
+  conversations: Record<string, ConversationSettings>;
+}
+
+export interface ConversationSettings {
+  currentProject: string | null;
+  currentSession: string | null;
+  currentAgent: string | null;
+  currentModel: string | null;
+  currentVariant: string | null;
+  sessionDirectoryCache: Record<string, string>;
 }
 
 const SETTINGS_FILE = "settings.json";
@@ -20,9 +31,11 @@ class SettingsManager {
     currentSession: null,
     currentAgent: null,
     currentModel: null,
+    currentVariant: null,
     pinnedMessageId: null,
     ttsEnabled: false,
     sessionDirectoryCache: new Map(),
+    conversations: {},
   };
 
   private filePath = "";
@@ -48,9 +61,8 @@ class SettingsManager {
       this.data = {
         ...this.data,
         ...parsed,
-        sessionDirectoryCache: new Map(
-          Object.entries(parsed.sessionDirectoryCache ?? {}),
-        ),
+        sessionDirectoryCache: new Map(Object.entries(parsed.sessionDirectoryCache ?? {})),
+        conversations: parsed.conversations ?? {},
       };
     } catch (error) {
       logger.error("[Settings] Failed to load:", error);
@@ -101,6 +113,43 @@ class SettingsManager {
 
   setCurrentSession(session: string | null): void {
     this.data.currentSession = session;
+    this.save();
+  }
+
+  getSessionDirectory(session: string): string | null {
+    return this.data.sessionDirectoryCache.get(session) ?? null;
+  }
+
+  setSessionDirectory(session: string, directory: string): void {
+    this.data.sessionDirectoryCache.set(session, directory);
+    this.save();
+  }
+
+  getConversation(chatId: number): ConversationSettings {
+    const key = String(chatId);
+    const existing = this.data.conversations[key];
+    if (existing) return existing;
+
+    const created: ConversationSettings = {
+      currentProject: null,
+      currentSession: null,
+      currentAgent: null,
+      currentModel: null,
+      currentVariant: null,
+      sessionDirectoryCache: {},
+    };
+    this.data.conversations[key] = created;
+    this.save();
+    return created;
+  }
+
+  updateConversation(chatId: number, update: Partial<ConversationSettings>): void {
+    const current = this.getConversation(chatId);
+    this.data.conversations[String(chatId)] = {
+      ...current,
+      ...update,
+      sessionDirectoryCache: update.sessionDirectoryCache ?? current.sessionDirectoryCache,
+    };
     this.save();
   }
 

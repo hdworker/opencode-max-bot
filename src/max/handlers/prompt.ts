@@ -6,23 +6,33 @@ import { interactionManager } from "../../interaction/manager.js";
 import { questionManager } from "../../question/manager.js";
 import { modelManager } from "../../model/manager.js";
 import { agentManager } from "../../agent/manager.js";
+import { variantManager } from "../../variant/manager.js";
 import { logger } from "../../utils/logger.js";
+import { projectManager } from "../../project/manager.js";
+import { chunkText, renderText } from "../render/pipeline.js";
+import { startMaxEventSubscription } from "../event-handler.js";
+import { buildQuestionOptionsKeyboard } from "../utils/keyboard.js";
+import { replyToQuestion } from "./question.js";
+import { buildSessionPanel } from "../utils/session-panel.js";
+
+const MAX_RESPONSE_LENGTH = 4000;
 
 export function registerPromptHandler(bot: MaxBot): void {
   bot.onMessage(async (userId, chatId, text, message) => {
     if (!text || text.startsWith("/")) return;
 
-    if (interactionManager.isActive()) {
-      const active = interactionManager.getActive();
+    if (interactionManager.isActive(chatId)) {
+      const active = interactionManager.getActive(chatId);
 
       if (active?.kind === "rename") {
-        const session = sessionManager.getCurrentSession();
+        const session = sessionManager.getCurrentSession(chatId);
         if (session) {
           try {
             const result = await opencodeClient.session.update({
-              path: { id: session },
-              body: { title: text },
-            } as any);
+              sessionID: session,
+              directory: sessionManager.getCurrentSessionDirectory(chatId) ?? undefined,
+              title: text,
+            });
 
             if (result.error) throw result.error;
 
@@ -32,67 +42,102 @@ export function registerPromptHandler(bot: MaxBot): void {
             await bot.sendMessage(chatId, { text: "❌ Failed to rename session." });
           }
         }
-        interactionManager.clear();
+        interactionManager.clear(chatId);
         return;
       }
 
-      if (active?.kind === "question" && questionManager.isActive()) {
-        const current = questionManager.getCurrentQuestion();
+      if (active?.kind === "question" && questionManager.isActive(chatId)) {
+        const current = questionManager.getCurrentQuestion(chatId);
         if (current) {
-          questionManager.setCustomAnswer(0, text);
-          questionManager.nextQuestion();
+          questionManager.setCustomAnswer(chatId, questionManager.getCurrentIndex(chatId), text);
+          if (questionManager.nextQuestion(chatId)) {
+            const next = questionManager.getCurrentQuestion(chatId);
+            if (next) {
+              await bot.sendMessage(chatId, {
+                text: `❓ **${next.header ?? "Question"}**\n\n${next.question}`,
+                format: "markdown",
+                attachments: [buildQuestionOptionsKeyboard(next.options, next.multiple)],
+              });
+            }
+          } else {
+            try {
+              await replyToQuestion(chatId);
+            } catch (error) {
+              logger.error("[Question] Custom answer reply error:", error);
+              await bot.sendMessage(chatId, {
+                text: "❌ Failed to send the answer.",
+              });
+            }
+          }
         }
         return;
       }
     }
 
-    let sessionId = sessionManager.getCurrentSession();
+    let sessionId = sessionManager.getCurrentSession(chatId);
+    await projectManager.loadProjects();
+    const projectDirectory = projectManager.getCurrentProjectDirectory(chatId);
+    let sessionDirectory = sessionManager.getCurrentSessionDirectory(chatId) ?? projectDirectory;
+
     if (!sessionId) {
-      try {
-        const result = await opencodeClient.session.create({
-          body: { title: text.slice(0, 50) },
-        } as any);
-
-        const session = result.data;
-        if (!session) throw result.error ?? new Error("Failed to create session");
-
-        sessionId = session.id ?? "";
-        sessionManager.setCurrentSession(sessionId);
-      } catch (error) {
-        logger.error("[Prompt] Failed to create session:", error);
-        await bot.sendMessage(chatId, { text: "❌ Failed to create session." });
-        return;
-      }
+      await bot.sendMessage(chatId, {
+        text: "ℹ️ Сначала создайте или выберите сессию: /new или /sessions",
+      });
+      return;
     }
 
     if (!sessionId) return;
 
+    if (sessionDirectory) {
+      startMaxEventSubscription(bot, chatId, sessionDirectory);
+    }
+
     try {
       await bot.sendMessage(chatId, { text: "⏳ Processing..." });
 
-      const model = modelManager.getCurrentModel();
-      const agent = agentManager.getCurrentAgent();
+      const model = modelManager.getCurrentModelInfo(chatId);
+      const agent = agentManager.getCurrentAgent(chatId);
 
-      const promptBody: Record<string, unknown> = {
-        path: { id: sessionId },
-        body: {
-          parts: [{ type: "text", text }],
-        },
-      };
-
-      if (model) {
-        (promptBody.body as any).model = { providerID: "", modelID: model };
-      }
-      if (agent) {
-        (promptBody.body as any).agent = agent;
-      }
-
-      const result = await opencodeClient.session.prompt(promptBody as any);
+      const result = await opencodeClient.session.prompt({
+        sessionID: sessionId,
+        directory: sessionDirectory ?? undefined,
+        parts: [{ type: "text", text }],
+        model: model ? { providerID: model.providerId, modelID: model.id } : undefined,
+        agent: agent ?? undefined,
+        variant: variantManager.getCurrentVariant(chatId) ?? undefined,
+      });
 
       if (result.error) throw result.error;
+
+      const responseText =
+        result.data?.parts
+          ?.filter((part) => part.type === "text")
+          .map((part) => part.text)
+          .join("\n\n")
+          .trim() ?? "";
+
+      if (!responseText) {
+        await bot.sendMessage(chatId, {
+          text: "✅ Done. Панель сессии:",
+          attachments: [buildSessionPanel()],
+        });
+        return;
+      }
+
+      const chunks = chunkText(renderText(responseText), MAX_RESPONSE_LENGTH);
+      for (const [index, chunk] of chunks.entries()) {
+        await bot.sendMessage(chatId, {
+          text: chunk,
+          format: "markdown",
+          ...(index === chunks.length - 1 ? { attachments: [buildSessionPanel()] } : {}),
+        });
+      }
     } catch (error) {
       logger.error("[Prompt] Error:", error);
-      await bot.sendMessage(chatId, { text: "❌ Failed to send prompt." });
+      await bot.sendMessage(chatId, {
+        text: "❌ Failed to send prompt.",
+        attachments: [buildSessionPanel()],
+      });
     }
   });
 }

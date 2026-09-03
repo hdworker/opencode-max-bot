@@ -6,19 +6,20 @@ import { logger } from "../../utils/logger.js";
 
 export function registerRenameCommand(bot: MaxBot): void {
   bot.command("rename", "Rename current session", async (userId, chatId, text, args) => {
-    if (!sessionManager.hasActiveSession()) {
+    if (!sessionManager.hasActiveSession(chatId)) {
       await bot.sendMessage(chatId, { text: "No active session to rename." });
       return;
     }
 
     if (args) {
       try {
-        const session = sessionManager.getCurrentSession();
+        const session = sessionManager.getCurrentSession(chatId);
         if (session) {
           const result = await opencodeClient.session.update({
-            path: { id: session },
-            body: { title: args },
-          } as any);
+            sessionID: session,
+            directory: sessionManager.getCurrentSessionDirectory(chatId) ?? undefined,
+            title: args,
+          });
 
           if (result.error) throw result.error;
 
@@ -31,7 +32,7 @@ export function registerRenameCommand(bot: MaxBot): void {
       return;
     }
 
-    interactionManager.start("rename", sessionManager.getCurrentSession() ?? "");
+    interactionManager.start(chatId, "rename", sessionManager.getCurrentSession(chatId) ?? "");
     await bot.sendMessage(chatId, { text: "✏️ Send the new session name:" });
   });
 }

@@ -1,8 +1,6 @@
 import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
 
-const BASE_URL = "https://platform-api.max.ru";
-
 export interface MaxApiResponse<T = unknown> {
   success: boolean;
   message?: string;
@@ -150,6 +148,7 @@ export interface MaxBotInfo {
 export interface MaxUpdate {
   update_id: string;
   update_type: UpdateType;
+  chat_id?: number;
   message?: MaxMessage;
   user?: MaxUser;
   chat?: MaxChat;
@@ -176,7 +175,9 @@ export type UpdateType =
 export interface MaxCallback {
   callback_id: string;
   payload: string;
-  message: MaxMessage;
+  user?: MaxUser;
+  sender?: MaxUser;
+  message?: MaxMessage;
 }
 
 export interface MaxChat {
@@ -216,6 +217,15 @@ class MaxRateLimitError extends Error {
   }
 }
 
+class MaxRequestError extends Error {
+  constructor(
+    message: string,
+    public readonly retryable: boolean,
+  ) {
+    super(message);
+  }
+}
+
 export class MaxClient {
   private token: string;
   private baseUrl: string;
@@ -223,7 +233,7 @@ export class MaxClient {
 
   constructor(token?: string) {
     this.token = token || config.max.token;
-    this.baseUrl = BASE_URL;
+    this.baseUrl = config.max.apiUrl.replace(/\/$/, "");
     this.defaultHeaders = {
       Authorization: this.token,
     };
@@ -236,8 +246,13 @@ export class MaxClient {
     retries = 3,
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
+    // Retrying a mutating request can duplicate a message when the server
+    // accepted it but the response was lost. Only GET requests are safe to
+    // retry automatically; callers can explicitly retry an operation when
+    // they have an idempotency key or otherwise know it is safe.
+    const maxAttempts = method === "GET" ? retries : 1;
 
-    for (let attempt = 1; attempt <= retries; attempt++) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         const response = await fetch(url, {
           method,
@@ -252,7 +267,7 @@ export class MaxClient {
           const retryAfter = response.headers.get("Retry-After");
           const retryMs = retryAfter ? Number(retryAfter) * 1000 : 1000;
           logger.warn(`[MaxClient] Rate limited, waiting ${retryMs}ms`);
-          if (attempt < retries) {
+          if (attempt < maxAttempts) {
             await sleep(retryMs);
             continue;
           }
@@ -261,13 +276,17 @@ export class MaxClient {
 
         if (!response.ok) {
           const text = await response.text();
-          throw new Error(`Max API error ${response.status}: ${text}`);
+          throw new MaxRequestError(
+            `Max API error ${response.status}: ${text}`,
+            response.status >= 500,
+          );
         }
 
         return (await response.json()) as T;
       } catch (error) {
         if (error instanceof MaxRateLimitError) throw error;
-        if (attempt === retries) throw error;
+        if (error instanceof MaxRequestError && !error.retryable) throw error;
+        if (attempt === maxAttempts) throw error;
         const delay = Math.min(1000 * Math.pow(2, attempt - 1), 30000);
         logger.warn(`[MaxClient] Request failed (attempt ${attempt}), retrying in ${delay}ms`);
         await sleep(delay);
@@ -312,10 +331,7 @@ export class MaxClient {
     return { ...response, is_bot: true as const };
   }
 
-  async sendMessage(
-    userId: number,
-    body: SendMessageBody,
-  ): Promise<MaxMessage> {
+  async sendMessage(userId: number, body: SendMessageBody): Promise<MaxMessage> {
     const response = await this.request<{ message: MaxMessage }>(
       "POST",
       `/messages?user_id=${userId}`,
@@ -324,10 +340,7 @@ export class MaxClient {
     return response.message;
   }
 
-  async sendMessageToChat(
-    chatId: number,
-    body: SendMessageBody,
-  ): Promise<MaxMessage> {
+  async sendMessageToChat(chatId: number, body: SendMessageBody): Promise<MaxMessage> {
     const response = await this.request<{ message: MaxMessage }>(
       "POST",
       `/messages?chat_id=${chatId}`,
@@ -336,10 +349,7 @@ export class MaxClient {
     return response.message;
   }
 
-  async editMessage(
-    messageId: string,
-    body: Partial<SendMessageBody>,
-  ): Promise<MaxMessage> {
+  async editMessage(messageId: string, body: Partial<SendMessageBody>): Promise<MaxMessage> {
     const response = await this.request<{ message: MaxMessage }>(
       "PUT",
       `/messages/${messageId}`,
@@ -358,11 +368,11 @@ export class MaxClient {
     message?: { text?: string; format?: "markdown" | "html"; attachments?: Attachment[] },
   ): Promise<void> {
     const body: Record<string, unknown> = {};
-    
-    if (notification) {
-      body.notification = notification;
+
+    if (notification || !message) {
+      body.notification = notification || "✅";
     }
-    
+
     if (message) {
       body.message = message;
     }
@@ -370,10 +380,7 @@ export class MaxClient {
     await this.request("POST", `/answers?callback_id=${callbackId}`, body);
   }
 
-  async sendAction(
-    chatId: number,
-    action: SenderAction,
-  ): Promise<void> {
+  async sendAction(chatId: number, action: SenderAction): Promise<void> {
     await this.request("POST", `/chats/${chatId}/actions`, {
       action,
     });
@@ -384,28 +391,18 @@ export class MaxClient {
     if (marker) params.set("marker", marker);
     params.set("timeout", String(timeout));
 
-    return this.request<MaxGetUpdatesResponse>(
-      "GET",
-      `/updates?${params.toString()}`,
-    );
+    return this.request<MaxGetUpdatesResponse>("GET", `/updates?${params.toString()}`);
   }
 
   async getUploadUrl(type: "image" | "video" | "audio" | "file"): Promise<UploadUrlResponse> {
     return this.request<UploadUrlResponse>("POST", "/uploads", { type });
   }
 
-  async uploadFile(
-    uploadUrl: string,
-    file: Blob,
-    filename: string,
-  ): Promise<UploadFileResponse> {
+  async uploadFile(uploadUrl: string, file: Blob, filename: string): Promise<UploadFileResponse> {
     return this.requestMultipart(uploadUrl, file, filename);
   }
 
-  async uploadImage(
-    data: Buffer,
-    filename: string,
-  ): Promise<Attachment> {
+  async uploadImage(data: Buffer, filename: string): Promise<Attachment> {
     const { url } = await this.getUploadUrl("image");
     const blob = new Blob([new Uint8Array(data)]);
     const payload = await this.uploadFile(url, blob, filename);
@@ -422,10 +419,7 @@ export class MaxClient {
     };
   }
 
-  async uploadFileAttachment(
-    data: Buffer,
-    filename: string,
-  ): Promise<Attachment> {
+  async uploadFileAttachment(data: Buffer, filename: string): Promise<Attachment> {
     const { url } = await this.getUploadUrl("file");
     const blob = new Blob([new Uint8Array(data)]);
     const payload = await this.uploadFile(url, blob, filename);
@@ -439,10 +433,7 @@ export class MaxClient {
     };
   }
 
-  async uploadVideo(
-    data: Buffer,
-    filename: string,
-  ): Promise<Attachment> {
+  async uploadVideo(data: Buffer, filename: string): Promise<Attachment> {
     const { url } = await this.getUploadUrl("video");
     const blob = new Blob([new Uint8Array(data)]);
     const payload = await this.uploadFile(url, blob, filename);
@@ -455,10 +446,7 @@ export class MaxClient {
     };
   }
 
-  async uploadAudio(
-    data: Buffer,
-    filename: string,
-  ): Promise<Attachment> {
+  async uploadAudio(data: Buffer, filename: string): Promise<Attachment> {
     const { url } = await this.getUploadUrl("audio");
     const blob = new Blob([new Uint8Array(data)]);
     const payload = await this.uploadFile(url, blob, filename);

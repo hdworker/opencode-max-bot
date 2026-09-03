@@ -1,4 +1,4 @@
-import { settingsManager } from "../settings/manager.js";
+import { conversationContext } from "../conversation/context.js";
 
 export interface VariantInfo {
   id: string;
@@ -6,23 +6,22 @@ export interface VariantInfo {
 }
 
 class VariantManager {
-  private variants: VariantInfo[] = [];
-  private currentVariant: string | null = null;
+  private variants = new Map<number, VariantInfo[]>();
 
-  getVariants(): VariantInfo[] {
-    return this.variants;
+  getVariants(chatId: number): VariantInfo[] {
+    return this.variants.get(chatId) ?? [];
   }
 
-  setVariants(variants: VariantInfo[]): void {
-    this.variants = variants;
+  setVariants(chatId: number, variants: VariantInfo[]): void {
+    this.variants.set(chatId, variants);
   }
 
-  getCurrentVariant(): string | null {
-    return this.currentVariant;
+  getCurrentVariant(chatId: number): string | null {
+    return conversationContext.get(chatId).variant;
   }
 
-  setCurrentVariant(variantId: string | null): void {
-    this.currentVariant = variantId;
+  setCurrentVariant(chatId: number, variantId: string | null): void {
+    conversationContext.setVariant(chatId, variantId);
   }
 }
 

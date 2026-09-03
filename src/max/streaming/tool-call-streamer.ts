@@ -12,11 +12,7 @@ export class ToolCallStreamer {
     this.bot = bot;
   }
 
-  async onToolCall(
-    chatId: number,
-    toolName: string,
-    state: string,
-  ): Promise<void> {
+  async onToolCall(chatId: number, toolName: string, state: string): Promise<void> {
     const now = Date.now();
     if (now - this.lastUpdate < TOOL_STREAM_THROTTLE_MS && this.currentMessageId) {
       return;

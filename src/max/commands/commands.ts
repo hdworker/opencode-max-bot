@@ -1,7 +1,7 @@
 import type { MaxBot } from "../bot.js";
 
 export function registerCommandsCommand(bot: MaxBot): void {
-  bot.command("commands", "List all bot commands", async (userId) => {
+  bot.command("commands", "List all bot commands", async (userId, chatId) => {
     const { COMMAND_DEFINITIONS } = await import("./definitions.js");
 
     let text = "📋 **All Commands**\n\n";
@@ -9,6 +9,6 @@ export function registerCommandsCommand(bot: MaxBot): void {
       text += `/${def.command}\n`;
     }
 
-    await bot.sendMessage(userId, { text, format: "markdown" });
+    await bot.sendMessage(chatId, { text, format: "markdown" });
   });
 }

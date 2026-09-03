@@ -1,44 +1,55 @@
 import type { MaxBot } from "../bot.js";
-import { opencodeClient } from "../../opencode/client.js";
 import { sessionManager } from "../../session/manager.js";
 import { logger } from "../../utils/logger.js";
+import { projectManager } from "../../project/manager.js";
+import { openCodeWorkspace } from "../../opencode/workspace.js";
 
 export function registerSessionsCommand(bot: MaxBot): void {
-  bot.command("sessions", "List recent sessions", async (userId) => {
+  const listSessions = async (userId: number, chatId: number): Promise<void> => {
     try {
-      const result = await opencodeClient.session.list();
-      const sessions = result.data ?? [];
+      await projectManager.loadProjects();
+      const directory = projectManager.getCurrentProjectDirectory(chatId);
+      const sessions = await openCodeWorkspace.listSessions(directory);
 
       if (sessions.length === 0) {
-        await bot.sendMessage(userId, { text: "No sessions found." });
+        await bot.sendMessage(chatId, {
+          text: "📭 Сессий пока нет. Создайте первую командой /new.",
+        });
         return;
       }
 
       let text = "📋 **Recent Sessions**\n\n";
       const buttons: Array<Array<{ type: "callback"; text: string; payload: string }>> = [];
-      
+
       for (const session of sessions.slice(0, 10)) {
-        const id = (session.id ?? "").slice(0, 8);
-        const title = session.title ?? "Untitled";
+        const id = session.id.slice(0, 8);
+        const title = session.title;
         text += `• ${title} (${id})\n`;
-        buttons.push([{
-          type: "callback",
-          text: `📁 ${title}`,
-          payload: `select_session:${session.id}`,
-        }]);
+        buttons.push([
+          {
+            type: "callback",
+            text: `📁 ${title}`,
+            payload: `select_session:${session.id}`,
+          },
+        ]);
       }
 
-      await bot.sendMessage(userId, {
+      await bot.sendMessage(chatId, {
         text,
         format: "markdown",
-        attachments: [{
-          type: "inline_keyboard",
-          payload: { buttons },
-        }],
+        attachments: [
+          {
+            type: "inline_keyboard",
+            payload: { buttons },
+          },
+        ],
       });
     } catch (error) {
       logger.error("[Sessions] Error:", error);
-      await bot.sendMessage(userId, { text: "❌ Failed to list sessions." });
+      await bot.sendMessage(chatId, { text: "❌ Не удалось получить список сессий." });
     }
-  });
+  };
+
+  bot.command("session", "List recent sessions", listSessions);
+  bot.command("sessions", "List recent sessions", listSessions);
 }

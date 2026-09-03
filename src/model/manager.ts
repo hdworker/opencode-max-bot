@@ -1,60 +1,64 @@
-import { opencodeClient } from "../opencode/client.js";
 import { logger } from "../utils/logger.js";
 import { settingsManager } from "../settings/manager.js";
+import { projectManager } from "../project/manager.js";
+import { conversationContext } from "../conversation/context.js";
+import { openCodeWorkspace } from "../opencode/workspace.js";
 
 export interface ModelInfo {
   id: string;
   name: string;
   providerId: string;
+  variants: string[];
+}
+
+export function modelSelectionId(model: ModelInfo): string {
+  return `${model.providerId}::${model.id}`;
 }
 
 class ModelManager {
-  private models: ModelInfo[] = [];
-  private currentModel: string | null = null;
+  private models = new Map<number, ModelInfo[]>();
 
-  async loadModels(): Promise<void> {
+  async loadModels(chatId?: number): Promise<void> {
     try {
-      const { data, error } = await opencodeClient.config.providers();
-
-      if (error) {
-        throw error;
-      }
-
-      const providers = data?.providers ?? [];
-      this.models = [];
-
-      for (const provider of providers) {
-        const modelsRecord = provider.models ?? {};
-        for (const [modelId, model] of Object.entries(modelsRecord)) {
-          this.models.push({
-            id: modelId,
-            name: model.name ?? modelId,
-            providerId: provider.id ?? "",
-          });
-        }
-      }
-
-      this.currentModel = settingsManager.getCurrentModel();
+      this.models.set(
+        chatId ?? 0,
+        await openCodeWorkspace.listModels(projectManager.getCurrentProjectDirectory(chatId)),
+      );
     } catch (error) {
       logger.error("[ModelManager] Failed to load models:", error);
     }
   }
 
-  getModels(): ModelInfo[] {
-    return this.models;
+  getModels(chatId?: number): ModelInfo[] {
+    return this.models.get(chatId ?? 0) ?? [];
   }
 
-  getCurrentModel(): string | null {
-    return this.currentModel;
+  getCurrentModel(chatId?: number): string | null {
+    return chatId === undefined ? settingsManager.getCurrentModel() : conversationContext.get(chatId).model;
   }
 
-  setCurrentModel(modelId: string | null): void {
-    this.currentModel = modelId;
+  getCurrentModelInfo(chatId?: number): ModelInfo | undefined {
+    const currentModel = this.getCurrentModel(chatId);
+    return currentModel
+      ? this.getModels(chatId).find((model) => modelSelectionId(model) === currentModel) ??
+        this.getModels(chatId).find((model) => model.id === currentModel)
+      : undefined;
+  }
+
+  setCurrentModel(modelId: string | null, chatId?: number): void {
+    if (chatId !== undefined) {
+      conversationContext.setModel(chatId, modelId);
+      return;
+    }
     settingsManager.setCurrentModel(modelId);
   }
 
-  getModelById(id: string): ModelInfo | undefined {
-    return this.models.find((m) => m.id === id);
+  getModelById(id: string, chatId?: number): ModelInfo | undefined {
+    return this.getModels(chatId).find((m) => m.id === id);
+  }
+
+  getModelBySelectionId(selectionId: string, chatId?: number): ModelInfo | undefined {
+    return this.getModels(chatId).find((model) => modelSelectionId(model) === selectionId);
   }
 }
 

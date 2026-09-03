@@ -7,13 +7,13 @@ import { agentManager } from "../../agent/manager.js";
 import { logger } from "../../utils/logger.js";
 
 export function registerStatusCommand(bot: MaxBot): void {
-  bot.command("status", "Show current status", async (userId) => {
+  bot.command("status", "Show current status", async (userId, chatId) => {
     try {
       const healthResult = await opencodeClient.global.health();
       const project = settingsManager.getCurrentProject();
-      const session = sessionManager.getCurrentSession();
-      const model = modelManager.getCurrentModel();
-      const agent = agentManager.getCurrentAgent();
+      const session = sessionManager.getCurrentSession(chatId);
+      const model = modelManager.getCurrentModel(chatId);
+      const agent = agentManager.getCurrentAgent(chatId);
 
       const health = healthResult.data;
 
@@ -33,10 +33,10 @@ export function registerStatusCommand(bot: MaxBot): void {
         text += `🧑 Agent: ${agent}\n`;
       }
 
-      await bot.sendMessage(userId, { text, format: "markdown" });
+      await bot.sendMessage(chatId, { text, format: "markdown" });
     } catch (error) {
       logger.error("[Status] Error:", error);
-      await bot.sendMessage(userId, {
+      await bot.sendMessage(chatId, {
         text: "❌ Cannot connect to OpenCode server.",
         format: "markdown",
       });

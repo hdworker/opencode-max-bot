@@ -54,14 +54,10 @@ export function buildQuestionOptionsKeyboard(
   }
 
   if (multiple) {
-    buttons.push([
-      { type: "callback", text: "➡️ Next", payload: "q_next" },
-    ]);
+    buttons.push([{ type: "callback", text: "➡️ Next", payload: "q_next" }]);
   }
 
-  buttons.push([
-    { type: "callback", text: "✏️ Custom", payload: "q_custom" },
-  ]);
+  buttons.push([{ type: "callback", text: "✏️ Custom", payload: "q_custom" }]);
 
   return {
     type: "inline_keyboard",

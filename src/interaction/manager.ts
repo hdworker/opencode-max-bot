@@ -18,50 +18,56 @@ export interface ActiveInteraction {
 const INTERACTION_TIMEOUT_MS = 5 * 60 * 1000;
 
 class InteractionManager {
-  private active: ActiveInteraction | null = null;
+  private active = new Map<number, ActiveInteraction>();
 
-  start(kind: InteractionKind, sessionId: string, allowedCommands?: string[]): boolean {
-    if (this.active) {
+  start(
+    chatId: number,
+    kind: InteractionKind,
+    sessionId: string,
+    allowedCommands?: string[],
+  ): boolean {
+    if (this.active.has(chatId)) {
       return false;
     }
 
-    this.active = {
+    this.active.set(chatId, {
       kind,
       sessionId,
       startedAt: Date.now(),
       allowedCommands,
-    };
+    });
 
     return true;
   }
 
-  isActive(): boolean {
-    if (!this.active) return false;
+  isActive(chatId: number): boolean {
+    const active = this.active.get(chatId);
+    if (!active) return false;
 
-    if (Date.now() - this.active.startedAt > INTERACTION_TIMEOUT_MS) {
-      this.clear();
+    if (Date.now() - active.startedAt > INTERACTION_TIMEOUT_MS) {
+      this.clear(chatId);
       return false;
     }
 
     return true;
   }
 
-  getActive(): ActiveInteraction | null {
-    return this.active;
+  getActive(chatId: number): ActiveInteraction | null {
+    return this.active.get(chatId) ?? null;
   }
 
-  clear(): void {
-    this.active = null;
+  clear(chatId: number): void {
+    this.active.delete(chatId);
   }
 
-  isKind(kind: InteractionKind): boolean {
-    return this.active?.kind === kind;
+  isKind(chatId: number, kind: InteractionKind): boolean {
+    return this.active.get(chatId)?.kind === kind;
   }
 
-  isAllowedCommand(command: string): boolean {
-    if (!this.active) return true;
-    if (!this.active.allowedCommands) return true;
-    return this.active.allowedCommands.includes(command);
+  isAllowedCommand(chatId: number, command: string): boolean {
+    const active = this.active.get(chatId);
+    if (!active?.allowedCommands) return true;
+    return active.allowedCommands.includes(command);
   }
 }
 

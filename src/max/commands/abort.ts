@@ -5,7 +5,7 @@ import { logger } from "../../utils/logger.js";
 
 export function registerAbortCommand(bot: MaxBot): void {
   bot.command("abort", "Abort current session", async (userId, chatId) => {
-    const session = sessionManager.getCurrentSession();
+    const session = sessionManager.getCurrentSession(chatId);
     if (!session) {
       await bot.sendMessage(chatId, { text: "No active session." });
       return;
@@ -13,8 +13,9 @@ export function registerAbortCommand(bot: MaxBot): void {
 
     try {
       const result = await opencodeClient.session.abort({
-        path: { id: session },
-      } as any);
+        sessionID: session,
+        directory: sessionManager.getCurrentSessionDirectory(chatId) ?? undefined,
+      });
 
       if (result.error) {
         throw result.error;

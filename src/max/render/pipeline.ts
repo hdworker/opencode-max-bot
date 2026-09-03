@@ -5,9 +5,7 @@ export interface RenderedBlock {
 }
 
 export function normalizeMarkdown(text: string): string {
-  return text
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n");
+  return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
 export function parseBlocks(text: string): RenderedBlock[] {
@@ -101,9 +99,7 @@ export function renderToMaxMarkdown(blocks: RenderedBlock[]): string {
         parts.push(`**${block.content}**`);
         break;
       case "code":
-        parts.push("```" + (block.language ?? ""));
-        parts.push(block.content);
-        parts.push("```");
+        parts.push(["```" + (block.language ?? ""), block.content, "```"].join("\n"));
         break;
       case "quote":
         parts.push(
@@ -123,7 +119,7 @@ export function renderToMaxMarkdown(blocks: RenderedBlock[]): string {
     }
   }
 
-  return parts.join("\n\n");
+  return parts.filter((part) => part.trim().length > 0).join("\n\n");
 }
 
 export function chunkText(text: string, maxLength = 4000): string[] {
