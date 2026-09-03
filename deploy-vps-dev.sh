@@ -14,11 +14,11 @@ npm install --global opencode-ai
 
 install -d -o dev -g dev "$APP_DIR"
 if [ -d "$APP_DIR/.git" ]; then
-  git -C "$APP_DIR" fetch --depth 1 origin main
-  git -C "$APP_DIR" checkout --detach FETCH_HEAD
+  runuser -u dev -- env HOME=/home/dev git -C "$APP_DIR" fetch --depth 1 origin main
+  runuser -u dev -- env HOME=/home/dev git -C "$APP_DIR" checkout --detach FETCH_HEAD
 else
   rm -rf "$APP_DIR"
-  git clone --depth 1 --branch main "$REPO_URL" "$APP_DIR"
+  runuser -u dev -- env HOME=/home/dev git clone --depth 1 --branch main "$REPO_URL" "$APP_DIR"
 fi
 chown -R dev:dev "$APP_DIR"
 
