@@ -10,7 +10,9 @@ apt-get update
 apt-get install -y ca-certificates curl git nodejs npm
 
 # OpenCode runs as dev, while the executable is installed system-wide.
-npm install --global opencode-ai
+if ! command -v opencode >/dev/null 2>&1; then
+  npm install --global opencode-ai
+fi
 
 install -d -o dev -g dev "$APP_DIR"
 if [ -d "$APP_DIR/.git" ]; then
