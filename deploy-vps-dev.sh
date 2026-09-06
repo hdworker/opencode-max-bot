@@ -34,7 +34,7 @@ chown root:root "$ENV_FILE"
 OPENCODE_BIN="$(command -v opencode)"
 NODE_BIN="$(command -v node)"
 
-install -m 0644 /dev/fd/0 /etc/systemd/system/opencode.service <<UNIT
+cp /dev/fd/0 /etc/systemd/system/opencode.service <<UNIT
 [Unit]
 Description=OpenCode headless server for MAX bot
 After=network-online.target
@@ -53,8 +53,9 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 UNIT
+chmod 0644 /etc/systemd/system/opencode.service
 
-install -m 0644 /dev/fd/0 /etc/systemd/system/opencode-max-bot.service <<UNIT
+cp /dev/fd/0 /etc/systemd/system/opencode-max-bot.service <<UNIT
 [Unit]
 Description=OpenCode MAX bot
 Requires=opencode.service
@@ -73,6 +74,7 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 UNIT
+chmod 0644 /etc/systemd/system/opencode-max-bot.service
 
 systemctl daemon-reload
 systemctl enable opencode.service
