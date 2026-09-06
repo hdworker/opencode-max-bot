@@ -11,6 +11,10 @@ export interface ProjectInfo {
 class ProjectManager {
   private projects: ProjectInfo[] = [];
 
+  private customProject(path: string): ProjectInfo {
+    return { id: `directory:${path}`, worktree: path };
+  }
+
   async loadProjects(): Promise<void> {
     try {
       this.projects = await openCodeWorkspace.listProjects();
@@ -24,7 +28,14 @@ class ProjectManager {
   }
 
   getProjectById(id: string): ProjectInfo | undefined {
-    return this.projects.find((p) => p.id === id);
+    return this.projects.find((p) => p.id === id) ??
+      (id.startsWith("directory:") ? this.customProject(id.slice("directory:".length)) : undefined);
+  }
+
+  setCurrentProjectDirectory(chatId: number, directory: string): ProjectInfo {
+    const project = this.customProject(directory);
+    this.setCurrentProject(chatId, project.id);
+    return project;
   }
 
   getCurrentProject(chatId?: number): ProjectInfo | undefined {

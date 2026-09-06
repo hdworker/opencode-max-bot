@@ -35,6 +35,8 @@ import { registerMcpsCommand } from "../max/commands/mcps.js";
 import { registerModelsCommand } from "../max/commands/models.js";
 import { registerOpencodeStartCommand } from "../max/commands/opencode-start.js";
 import { registerOpencodeStopCommand } from "../max/commands/opencode-stop.js";
+import { registerOpenCommand, registerOpenCallback } from "../max/commands/open.js";
+import { registerLsCommand, registerLsCallback } from "../max/commands/ls.js";
 
 // Handler registrations
 import { registerPromptHandler } from "../max/handlers/prompt.js";
@@ -87,6 +89,8 @@ export async function startBotApp(): Promise<void> {
   registerAbortCommand(bot);
   registerSessionsCommand(bot);
   registerProjectsCommand(bot);
+  registerOpenCommand(bot);
+  registerLsCommand(bot);
   registerRenameCommand(bot);
   registerDetachCommand(bot);
   registerTtsCommand(bot);
@@ -105,6 +109,8 @@ export async function startBotApp(): Promise<void> {
   registerPermissionCallback(bot);
   registerAgentCallback(bot);
   registerProjectSelectCallback(bot);
+  registerOpenCallback(bot);
+  registerLsCallback(bot);
   registerSessionSelectCallback(bot);
 
   safeBackgroundTask({

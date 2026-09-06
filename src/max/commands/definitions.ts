@@ -11,6 +11,8 @@ export const COMMAND_DEFINITIONS: BotCommandDefinition[] = [
   { command: "abort", descriptionKey: "cmd.description.abort" },
   { command: "sessions", descriptionKey: "cmd.description.sessions" },
   { command: "projects", descriptionKey: "cmd.description.projects" },
+  { command: "open", descriptionKey: "cmd.description.open" },
+  { command: "ls", descriptionKey: "cmd.description.ls" },
   { command: "rename", descriptionKey: "cmd.description.rename" },
   { command: "opencode_start", descriptionKey: "cmd.description.opencode_start" },
   { command: "opencode_stop", descriptionKey: "cmd.description.opencode_stop" },
