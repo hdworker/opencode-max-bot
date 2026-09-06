@@ -46,11 +46,16 @@ export function registerPromptHandler(bot: MaxBot): void {
         return;
       }
 
-      if (active?.kind === "question" && questionManager.isActive(chatId)) {
+      if (
+        (active?.kind === "question" || active?.kind === "question_custom") &&
+        questionManager.isActive(chatId)
+      ) {
         const current = questionManager.getCurrentQuestion(chatId);
         if (current) {
           questionManager.setCustomAnswer(chatId, questionManager.getCurrentIndex(chatId), text);
           if (questionManager.nextQuestion(chatId)) {
+            interactionManager.clear(chatId);
+            interactionManager.start(chatId, "question", active.sessionId);
             const next = questionManager.getCurrentQuestion(chatId);
             if (next) {
               await bot.sendMessage(chatId, {
@@ -65,8 +70,13 @@ export function registerPromptHandler(bot: MaxBot): void {
             } catch (error) {
               logger.error("[Question] Custom answer reply error:", error);
               await bot.sendMessage(chatId, {
-                text: "❌ Failed to send the answer.",
+                text: "❌ Failed to send the answer. Try again or use a command.",
+                attachments: [
+                  buildQuestionOptionsKeyboard(current.options, current.multiple),
+                ],
               });
+              interactionManager.clear(chatId);
+              interactionManager.start(chatId, "question_custom", active.sessionId);
             }
           }
         }

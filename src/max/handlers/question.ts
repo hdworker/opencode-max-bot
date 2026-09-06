@@ -6,16 +6,38 @@ import { sessionManager } from "../../session/manager.js";
 import { interactionManager } from "../../interaction/manager.js";
 import { buildQuestionOptionsKeyboard } from "../utils/keyboard.js";
 
+const QUESTION_REPLY_TIMEOUT_MS = 30_000;
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Question reply timed out after ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function replyToQuestion(chatId: number): Promise<void> {
   const active = questionManager.getActive(chatId);
   const requestID = questionManager.getRequestId(chatId);
   if (!active || !requestID) return;
 
-  const result = await opencodeClient.question.reply({
-    requestID,
-    directory: sessionManager.getSessionDirectory(active.sessionId, chatId) ?? undefined,
-    answers: questionManager.getAnswers(chatId),
-  });
+  const result = await withTimeout(
+    opencodeClient.question.reply({
+      requestID,
+      directory: sessionManager.getSessionDirectory(active.sessionId, chatId) ?? undefined,
+      answers: questionManager.getAnswers(chatId),
+    }),
+    QUESTION_REPLY_TIMEOUT_MS,
+  );
 
   if (result.error) throw result.error;
   questionManager.clear(chatId);
@@ -53,6 +75,12 @@ export function registerQuestionCallback(bot: MaxBot): void {
 
       if (data === "q_custom") {
         await bot.answerCallback(callback.callback_id);
+        interactionManager.clear(chatId);
+        interactionManager.start(
+          chatId,
+          "question_custom",
+          questionManager.getActive(chatId)?.sessionId ?? "",
+        );
         await bot.sendMessage(chatId, { text: "✏️ Type your answer:" });
       }
 

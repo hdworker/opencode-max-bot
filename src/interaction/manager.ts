@@ -1,5 +1,6 @@
 export type InteractionKind =
   | "question"
+  | "question_custom"
   | "permission"
   | "rename"
   | "task"
