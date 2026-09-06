@@ -2,6 +2,7 @@ import type { MaxBot } from "../bot.js";
 import { logger } from "../../utils/logger.js";
 import { projectManager } from "../../project/manager.js";
 import { openCodeWorkspace } from "../../opencode/workspace.js";
+import { clearChatWorkflowState } from "../../interaction/reset.js";
 
 const PROJECT_SELECT_CALLBACK_PREFIX = "project:";
 
@@ -116,6 +117,7 @@ export function registerProjectSelectCallback(bot: MaxBot): void {
       }
 
       projectManager.setCurrentProject(chatId, projectId);
+      clearChatWorkflowState(chatId);
       const folderName = getProjectFolderName(project.worktree);
 
       const sessions = await openCodeWorkspace.listSessions(project.worktree);

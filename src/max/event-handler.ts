@@ -28,13 +28,14 @@ async function handleEvent(bot: MaxBot, chatId: number, event: Event): Promise<v
       if (sessionManager.getCurrentSession(chatId) !== request.sessionID) return;
       permissionManager.add({
         id: request.id,
+        chatId,
         sessionId: request.sessionID,
         message: request.permission,
         patterns: request.patterns,
       });
 
       interactionManager.clear(chatId);
-      interactionManager.start(chatId, "permission", request.sessionID);
+      interactionManager.start(chatId, "permission", request.sessionID, undefined, request.id);
       await bot.sendMessage(chatId, {
         text: `🔐 **Permission required**\n\n${request.permission}`,
         format: "markdown",
@@ -68,14 +69,22 @@ async function handleEvent(bot: MaxBot, chatId: number, event: Event): Promise<v
 
       questionManager.start(chatId, questions, request.id, request.sessionID);
       interactionManager.clear(chatId);
-      interactionManager.start(chatId, "question", request.sessionID);
+      interactionManager.start(chatId, "question", request.sessionID, undefined, request.id);
 
       const current = questionManager.getCurrentQuestion(chatId);
       if (current) {
         await bot.sendMessage(chatId, {
           text: questionText(current),
           format: "markdown",
-          attachments: [buildQuestionOptionsKeyboard(current.options, current.multiple)],
+        attachments: [
+          buildQuestionOptionsKeyboard(
+            current.options,
+            current.multiple,
+            request.id,
+            questionManager.getCurrentIndex(chatId),
+            current.custom,
+          ),
+        ],
         });
       }
       return;

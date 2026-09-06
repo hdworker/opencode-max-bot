@@ -12,6 +12,7 @@ export type InteractionKind =
 export interface ActiveInteraction {
   kind: InteractionKind;
   sessionId: string;
+  requestId?: string;
   startedAt: number;
   allowedCommands?: string[];
 }
@@ -26,6 +27,7 @@ class InteractionManager {
     kind: InteractionKind,
     sessionId: string,
     allowedCommands?: string[],
+    requestId?: string,
   ): boolean {
     if (this.active.has(chatId)) {
       return false;
@@ -34,6 +36,7 @@ class InteractionManager {
     this.active.set(chatId, {
       kind,
       sessionId,
+      requestId,
       startedAt: Date.now(),
       allowedCommands,
     });

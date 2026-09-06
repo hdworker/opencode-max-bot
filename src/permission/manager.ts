@@ -1,5 +1,6 @@
 export interface PermissionRequest {
   id: string;
+  chatId: number;
   sessionId: string;
   message: string;
   patterns?: string[];
@@ -41,6 +42,12 @@ class PermissionManager {
   clear(): void {
     this.requests.clear();
     this.messageToId.clear();
+  }
+
+  clearForChat(chatId: number): void {
+    for (const request of this.requests.values()) {
+      if (request.chatId === chatId) this.remove(request.id);
+    }
   }
 }
 

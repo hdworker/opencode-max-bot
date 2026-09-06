@@ -55,13 +55,21 @@ export function registerPromptHandler(bot: MaxBot): void {
           questionManager.setCustomAnswer(chatId, questionManager.getCurrentIndex(chatId), text);
           if (questionManager.nextQuestion(chatId)) {
             interactionManager.clear(chatId);
-            interactionManager.start(chatId, "question", active.sessionId);
+            interactionManager.start(chatId, "question", active.sessionId, undefined, active.requestId);
             const next = questionManager.getCurrentQuestion(chatId);
             if (next) {
               await bot.sendMessage(chatId, {
                 text: `❓ **${next.header ?? "Question"}**\n\n${next.question}`,
                 format: "markdown",
-                attachments: [buildQuestionOptionsKeyboard(next.options, next.multiple)],
+                attachments: [
+                  buildQuestionOptionsKeyboard(
+                    next.options,
+                    next.multiple,
+                    questionManager.getRequestId(chatId) ?? "",
+                    questionManager.getCurrentIndex(chatId),
+                    next.custom,
+                  ),
+                ],
               });
             }
           } else {
@@ -72,11 +80,23 @@ export function registerPromptHandler(bot: MaxBot): void {
               await bot.sendMessage(chatId, {
                 text: "❌ Failed to send the answer. Try again or use a command.",
                 attachments: [
-                  buildQuestionOptionsKeyboard(current.options, current.multiple),
+                  buildQuestionOptionsKeyboard(
+                    current.options,
+                    current.multiple,
+                    questionManager.getRequestId(chatId) ?? "",
+                    questionManager.getCurrentIndex(chatId),
+                    current.custom,
+                  ),
                 ],
               });
               interactionManager.clear(chatId);
-              interactionManager.start(chatId, "question_custom", active.sessionId);
+              interactionManager.start(
+                chatId,
+                "question_custom",
+                active.sessionId,
+                undefined,
+                active.requestId,
+              );
             }
           }
         }

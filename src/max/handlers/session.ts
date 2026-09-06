@@ -7,6 +7,7 @@ import { openCodeWorkspace } from "../../opencode/workspace.js";
 import { interactionManager } from "../../interaction/manager.js";
 import { opencodeClient } from "../../opencode/client.js";
 import { buildSessionPanel } from "../utils/session-panel.js";
+import { clearChatWorkflowState } from "../../interaction/reset.js";
 
 export function registerSessionSelectCallback(bot: MaxBot): void {
   bot.callback(
@@ -17,6 +18,7 @@ export function registerSessionSelectCallback(bot: MaxBot): void {
         await bot.answerCallback(callback.callback_id, "⏳ Выполняю…");
 
         if (action === "new") {
+          clearChatWorkflowState(chatId);
           const directory = projectManager.getCurrentProjectDirectory(chatId);
           const session = await openCodeWorkspace.createSession(directory);
           sessionManager.setCurrentSession(chatId, session.id, session.directory || directory);
@@ -52,6 +54,7 @@ export function registerSessionSelectCallback(bot: MaxBot): void {
         }
 
         if (action === "detach") {
+          clearChatWorkflowState(chatId);
           sessionManager.setCurrentSession(chatId, null);
           await bot.sendMessage(chatId, {
             text: "🔌 Сессия отключена. Выберите /sessions или создайте /new.",
@@ -76,6 +79,7 @@ export function registerSessionSelectCallback(bot: MaxBot): void {
         const directory = projectManager.getCurrentProjectDirectory(chatId);
         const session = await openCodeWorkspace.getSession(sessionId, directory);
 
+        clearChatWorkflowState(chatId);
         sessionManager.setCurrentSession(chatId, sessionId, session.directory);
 
         await bot.sendMessage(chatId, {

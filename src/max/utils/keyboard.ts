@@ -40,6 +40,9 @@ export function buildConfirmationKeyboard(
 export function buildQuestionOptionsKeyboard(
   options: Array<{ label: string; value: string }>,
   multiple: boolean,
+  requestId: string,
+  questionIndex: number,
+  custom = true,
 ): InlineKeyboardAttachment {
   const buttons: KeyboardButton[][] = [];
 
@@ -48,16 +51,18 @@ export function buildQuestionOptionsKeyboard(
       {
         type: "callback",
         text: option.label,
-        payload: `q_option_${option.value}`,
+        payload: `q_option:${encodeURIComponent(requestId)}:${questionIndex}:${encodeURIComponent(option.value)}`,
       },
     ]);
   }
 
   if (multiple) {
-    buttons.push([{ type: "callback", text: "➡️ Next", payload: "q_next" }]);
+    buttons.push([{ type: "callback", text: "➡️ Next", payload: `q_next:${encodeURIComponent(requestId)}:${questionIndex}` }]);
   }
 
-  buttons.push([{ type: "callback", text: "✏️ Custom", payload: "q_custom" }]);
+  if (custom) {
+    buttons.push([{ type: "callback", text: "✏️ Custom", payload: `q_custom:${encodeURIComponent(requestId)}:${questionIndex}` }]);
+  }
 
   return {
     type: "inline_keyboard",

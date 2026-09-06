@@ -4,10 +4,12 @@ import { logger } from "../../utils/logger.js";
 import { projectManager } from "../../project/manager.js";
 import { openCodeWorkspace } from "../../opencode/workspace.js";
 import { buildSessionPanel } from "../utils/session-panel.js";
+import { clearChatWorkflowState } from "../../interaction/reset.js";
 
 export function registerNewCommand(bot: MaxBot): void {
   bot.command("new", "Create a new session", async (userId, chatId, text, args) => {
     try {
+      clearChatWorkflowState(chatId);
       await projectManager.loadProjects();
       const directory = projectManager.getCurrentProjectDirectory(chatId);
       const session = await openCodeWorkspace.createSession(directory, args || undefined);
