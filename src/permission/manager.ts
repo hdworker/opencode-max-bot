@@ -2,6 +2,7 @@ export interface PermissionRequest {
   id: string;
   chatId: number;
   sessionId: string;
+  directory?: string;
   message: string;
   patterns?: string[];
   messageId?: number;
@@ -25,6 +26,16 @@ class PermissionManager {
   getByMessageId(messageId: number): PermissionRequest | undefined {
     const id = this.messageToId.get(messageId);
     return id ? this.requests.get(id) : undefined;
+  }
+
+  getRelated(request: PermissionRequest): PermissionRequest[] {
+    return Array.from(this.requests.values()).filter(
+      (candidate) =>
+        candidate.chatId === request.chatId &&
+        candidate.sessionId === request.sessionId &&
+        candidate.message === request.message &&
+        JSON.stringify(candidate.patterns ?? []) === JSON.stringify(request.patterns ?? []),
+    );
   }
 
   remove(id: string): void {

@@ -23,16 +23,20 @@ export function buildSingleRowKeyboard(
 export function buildConfirmationKeyboard(
   confirmPayload: string,
   denyPayload: string,
+  alwaysPayload?: string,
 ): InlineKeyboardAttachment {
+  const buttons: KeyboardButton[] = [
+    { type: "callback", text: "✅ Allow once", payload: confirmPayload },
+  ];
+  if (alwaysPayload) {
+    buttons.push({ type: "callback", text: "♾️ Always allow", payload: alwaysPayload });
+  }
+  buttons.push({ type: "callback", text: "🛑 Deny", payload: denyPayload });
+
   return {
     type: "inline_keyboard",
     payload: {
-      buttons: [
-        [
-          { type: "callback", text: "✅ Allow", payload: confirmPayload },
-          { type: "callback", text: "🛑 Deny", payload: denyPayload },
-        ],
-      ],
+      buttons: [buttons],
     },
   };
 }

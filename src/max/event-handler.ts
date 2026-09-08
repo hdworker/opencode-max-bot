@@ -32,6 +32,7 @@ async function handleEvent(bot: MaxBot, chatId: number, event: Event): Promise<v
         sessionId: request.sessionID,
         message: request.permission,
         patterns: request.patterns,
+        directory: sessionManager.getCurrentSessionDirectory(chatId) ?? undefined,
       });
 
       interactionManager.clear(chatId);
@@ -40,7 +41,11 @@ async function handleEvent(bot: MaxBot, chatId: number, event: Event): Promise<v
         text: `🔐 **Permission required**\n\n${request.permission}`,
         format: "markdown",
         attachments: [
-          buildConfirmationKeyboard(`perm_allow_${request.id}`, `perm_deny_${request.id}`),
+          buildConfirmationKeyboard(
+            `perm_allow_${request.id}`,
+            `perm_deny_${request.id}`,
+            `perm_always_${request.id}`,
+          ),
         ],
       });
       return;
