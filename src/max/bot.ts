@@ -12,6 +12,7 @@ import type {
 import { maxClient } from "./client.js";
 import { MaxTransport, normalizeMaxUpdate } from "./transport.js";
 import { MaxUpdateDispatcher } from "./update-dispatcher.js";
+import { interactionManager } from "../interaction/manager.js";
 
 export type UpdateHandler = (update: MaxUpdate) => void | Promise<void>;
 
@@ -56,9 +57,17 @@ class MaxBot {
   private updateHandlers: UpdateHandler[] = [];
   private authUserId: number;
   private transport = new MaxTransport();
-  private updateDispatcher = new MaxUpdateDispatcher((error, update) => {
-    logger.error(`[Bot] Error processing update ${update.update_type}:`, error);
-  });
+  private updateDispatcher = new MaxUpdateDispatcher(
+    (error, update) => {
+      logger.error(`[Bot] Error processing update ${update.update_type}:`, error);
+    },
+    (_update, inbound) => {
+      if (inbound.kind !== "message") return false;
+      if (!interactionManager.isActive(inbound.address.chatId)) return false;
+      const kind = interactionManager.getActive(inbound.address.chatId)?.kind;
+      return kind === "rename" || kind === "question" || kind === "question_custom";
+    },
+  );
 
   constructor() {
     this.authUserId = config.max.allowedUserId;
@@ -200,7 +209,11 @@ class MaxBot {
     notification?: string,
     message?: { text?: string; format?: "markdown" | "html"; attachments?: Attachment[] },
   ): Promise<void> {
-    return this.transport.acknowledge(callbackId, notification, message);
+    try {
+      await this.transport.acknowledge(callbackId, notification, message);
+    } catch (error) {
+      logger.warn(`[Bot] Failed to acknowledge callback ${callbackId}:`, error);
+    }
   }
 
   async start(): Promise<void> {

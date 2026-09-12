@@ -17,7 +17,7 @@ export interface ActiveInteraction {
   allowedCommands?: string[];
 }
 
-const INTERACTION_TIMEOUT_MS = 5 * 60 * 1000;
+const INTERACTION_TIMEOUT_MS = 15 * 60 * 1000;
 
 class InteractionManager {
   private active = new Map<number, ActiveInteraction>();

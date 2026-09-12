@@ -33,6 +33,7 @@ class PermissionManager {
       (candidate) =>
         candidate.chatId === request.chatId &&
         candidate.sessionId === request.sessionId &&
+        candidate.directory === request.directory &&
         candidate.message === request.message &&
         JSON.stringify(candidate.patterns ?? []) === JSON.stringify(request.patterns ?? []),
     );

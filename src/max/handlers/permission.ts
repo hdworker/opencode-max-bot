@@ -81,16 +81,21 @@ export function registerPermissionCallback(bot: MaxBot): void {
 
         for (const relatedRequest of related) {
           try {
+            const controller = new AbortController();
             const result = await withTimeout(
-              opencodeClient.permission.reply({
-                requestID: relatedRequest.id,
-                directory:
-                  relatedRequest.directory ??
-                  sessionManager.getSessionDirectory(relatedRequest.sessionId, chatId) ??
-                  undefined,
-                reply: action,
-              }),
+              opencodeClient.permission.reply(
+                {
+                  requestID: relatedRequest.id,
+                  directory:
+                    relatedRequest.directory ??
+                    sessionManager.getSessionDirectory(relatedRequest.sessionId, chatId) ??
+                    undefined,
+                  reply: action,
+                },
+                { signal: controller.signal },
+              ),
               PERMISSION_REPLY_TIMEOUT_MS,
+              () => controller.abort(),
             );
 
             if (result.error) throw result.error;

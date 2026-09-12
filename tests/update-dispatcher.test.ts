@@ -121,4 +121,27 @@ describe("MaxUpdateDispatcher", () => {
     expect(calls).toEqual(["prompt:start", "command"]);
     gate.resolve();
   });
+
+  it("allows interaction text to bypass the regular message queue", async () => {
+    const gate = deferred();
+    const calls: string[] = [];
+    const dispatcher = new MaxUpdateDispatcher(
+      undefined,
+      (_update, inbound) => inbound.kind === "message" && inbound.text === "custom answer",
+    );
+
+    dispatcher.dispatch(messageUpdate("prompt"), async () => {
+      calls.push("prompt:start");
+      await gate.promise;
+    });
+    await flush();
+
+    dispatcher.dispatch(messageUpdate("custom answer"), async () => {
+      calls.push("custom");
+    });
+
+    await flush();
+    expect(calls).toEqual(["prompt:start", "custom"]);
+    gate.resolve();
+  });
 });

@@ -40,13 +40,18 @@ export async function replyToQuestion(chatId: number): Promise<void> {
   const requestID = questionManager.getRequestId(chatId);
   if (!active || !requestID) return;
 
+  const controller = new AbortController();
   const result = await withTimeout(
-    opencodeClient.question.reply({
-      requestID,
-      directory: sessionManager.getSessionDirectory(active.sessionId, chatId) ?? undefined,
-      answers: questionManager.getAnswers(chatId),
-    }),
+    opencodeClient.question.reply(
+      {
+        requestID,
+        directory: sessionManager.getSessionDirectory(active.sessionId, chatId) ?? undefined,
+        answers: questionManager.getAnswers(chatId),
+      },
+      { signal: controller.signal },
+    ),
     QUESTION_REPLY_TIMEOUT_MS,
+    () => controller.abort(),
   );
 
   if (result.error) throw result.error;

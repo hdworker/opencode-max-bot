@@ -35,8 +35,12 @@ async function handleEvent(bot: MaxBot, chatId: number, event: Event): Promise<v
         directory: sessionManager.getCurrentSessionDirectory(chatId) ?? undefined,
       });
 
-      interactionManager.clear(chatId);
-      interactionManager.start(chatId, "permission", request.sessionID, undefined, request.id);
+      const activeInteraction = interactionManager.isActive(chatId)
+        ? interactionManager.getActive(chatId)
+        : null;
+      if (!activeInteraction) {
+        interactionManager.start(chatId, "permission", request.sessionID, undefined, request.id);
+      }
       await bot.sendMessage(chatId, {
         text: `🔐 **Permission required**\n\n${request.permission}`,
         format: "markdown",

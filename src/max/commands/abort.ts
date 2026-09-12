@@ -2,6 +2,7 @@ import type { MaxBot } from "../bot.js";
 import { opencodeClient } from "../../opencode/client.js";
 import { sessionManager } from "../../session/manager.js";
 import { logger } from "../../utils/logger.js";
+import { clearChatWorkflowState } from "../../interaction/reset.js";
 
 export function registerAbortCommand(bot: MaxBot): void {
   bot.command("abort", "Abort current session", async (userId, chatId) => {
@@ -21,6 +22,7 @@ export function registerAbortCommand(bot: MaxBot): void {
         throw result.error;
       }
 
+      clearChatWorkflowState(chatId);
       await bot.sendMessage(chatId, { text: "🛑 Session aborted." });
     } catch (error) {
       logger.error("[Abort] Error:", error);

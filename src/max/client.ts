@@ -251,8 +251,11 @@ export class MaxClient {
     // retry automatically; callers can explicitly retry an operation when
     // they have an idempotency key or otherwise know it is safe.
     const maxAttempts = method === "GET" ? retries : 1;
+    const timeoutMs = path.startsWith("/updates?") ? 40_000 : 15_000;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
       try {
         const response = await fetch(url, {
           method,
@@ -261,6 +264,7 @@ export class MaxClient {
             "Content-Type": "application/json",
           },
           body: body ? JSON.stringify(body) : undefined,
+          signal: controller.signal,
         });
 
         if (response.status === 429) {
@@ -290,6 +294,8 @@ export class MaxClient {
         const delay = Math.min(1000 * Math.pow(2, attempt - 1), 30000);
         logger.warn(`[MaxClient] Request failed (attempt ${attempt}), retrying in ${delay}ms`);
         await sleep(delay);
+      } finally {
+        clearTimeout(timeout);
       }
     }
 

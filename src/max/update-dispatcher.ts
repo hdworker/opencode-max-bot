@@ -1,8 +1,9 @@
 import type { MaxUpdate } from "./client.js";
-import { normalizeMaxUpdate } from "./transport.js";
+import { normalizeMaxUpdate, type InboundMaxUpdate } from "./transport.js";
 
 export type UpdateTask = (update: MaxUpdate) => void | Promise<void>;
 export type UpdateErrorHandler = (error: unknown, update: MaxUpdate) => void;
+export type PriorityUpdatePredicate = (update: MaxUpdate, inbound: InboundMaxUpdate) => boolean;
 
 /**
  * Keeps long-running message work from blocking callbacks and commands.
@@ -15,11 +16,17 @@ export type UpdateErrorHandler = (error: unknown, update: MaxUpdate) => void;
 export class MaxUpdateDispatcher {
   private readonly messageTails = new Map<number, Promise<void>>();
 
-  constructor(private readonly onError: UpdateErrorHandler = () => undefined) {}
+  constructor(
+    private readonly onError: UpdateErrorHandler = () => undefined,
+    private readonly isPriorityUpdate: PriorityUpdatePredicate = () => false,
+  ) {}
 
   dispatch(update: MaxUpdate, task: UpdateTask): void {
     const inbound = normalizeMaxUpdate(update);
-    const isRegularMessage = inbound?.kind === "message" && !inbound.text.startsWith("/");
+    const isRegularMessage =
+      inbound?.kind === "message" &&
+      !inbound.text.startsWith("/") &&
+      !this.isPriorityUpdate(update, inbound);
 
     if (!isRegularMessage) {
       void this.run(update, task);

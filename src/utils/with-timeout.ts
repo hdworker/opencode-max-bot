@@ -1,4 +1,8 @@
-export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+export async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  onTimeout?: () => void,
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   try {
@@ -6,7 +10,10 @@ export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Pr
       promise,
       new Promise<never>((_, reject) => {
         timer = setTimeout(
-          () => reject(new Error(`Operation timed out after ${timeoutMs}ms`)),
+          () => {
+            onTimeout?.();
+            reject(new Error(`Operation timed out after ${timeoutMs}ms`));
+          },
           timeoutMs,
         );
       }),

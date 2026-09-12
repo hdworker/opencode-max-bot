@@ -30,12 +30,16 @@ function wait(ms: number, signal: AbortSignal): Promise<boolean> {
 async function readWithTimeout(
   stream: AsyncGenerator<Event, unknown, unknown>,
   signal: AbortSignal,
+  onTimeout?: () => void,
 ): Promise<IteratorResult<Event, unknown> | null> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) return resolve(null);
     const onAbort = () => finish(null);
     const timeout = setTimeout(
-      () => reject(new Error("OpenCode event stream idle timeout")),
+      () => {
+        reject(new Error("OpenCode event stream idle timeout"));
+        onTimeout?.();
+      },
       IDLE_TIMEOUT_MS,
     );
     const finish = (value: IteratorResult<Event, unknown> | null) => {
@@ -76,17 +80,29 @@ export class OpenCodeEventListener {
 
     while (!controller.signal.aborted) {
       try {
-        const result = await opencodeClient.event.subscribe(
-          { directory },
-          { signal: controller.signal },
-        );
-        if (!result.stream) throw new Error("OpenCode event subscription returned no stream");
-        attempt = 0;
+        const connectionController = new AbortController();
+        const abortConnection = () => connectionController.abort();
+        controller.signal.addEventListener("abort", abortConnection, { once: true });
+        try {
+          const result = await opencodeClient.event.subscribe(
+            { directory },
+            { signal: connectionController.signal },
+          );
+          if (!result.stream) throw new Error("OpenCode event subscription returned no stream");
+          attempt = 0;
 
-        while (!controller.signal.aborted) {
-          const next = await readWithTimeout(result.stream, controller.signal);
-          if (!next || next.done) break;
-          await callback(next.value);
+          while (!controller.signal.aborted) {
+            const next = await readWithTimeout(
+              result.stream,
+              connectionController.signal,
+              () => connectionController.abort(),
+            );
+            if (!next || next.done) break;
+            await callback(next.value);
+          }
+        } finally {
+          controller.signal.removeEventListener("abort", abortConnection);
+          connectionController.abort();
         }
       } catch (error) {
         if (controller.signal.aborted) break;

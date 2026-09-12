@@ -14,6 +14,11 @@ import { startMaxEventSubscription } from "../event-handler.js";
 import { buildQuestionOptionsKeyboard } from "../utils/keyboard.js";
 import { replyToQuestion } from "./question.js";
 import { buildSessionPanel } from "../utils/session-panel.js";
+import { promptOperationManager } from "../prompt-operation.js";
+import { withTimeout } from "../../utils/with-timeout.js";
+import { clearChatWorkflowState } from "../../interaction/reset.js";
+
+const PROMPT_TIMEOUT_MS = 15 * 60 * 1000;
 
 const MAX_RESPONSE_LENGTH = 4000;
 
@@ -122,20 +127,27 @@ export function registerPromptHandler(bot: MaxBot): void {
       startMaxEventSubscription(bot, chatId, sessionDirectory);
     }
 
+    const promptController = promptOperationManager.start(chatId, sessionId);
     try {
       await bot.sendMessage(chatId, { text: "⏳ Processing..." });
 
       const model = modelManager.getCurrentModelInfo(chatId);
       const agent = agentManager.getCurrentAgent(chatId);
 
-      const result = await opencodeClient.session.prompt({
-        sessionID: sessionId,
-        directory: sessionDirectory ?? undefined,
-        parts: [{ type: "text", text }],
-        model: model ? { providerID: model.providerId, modelID: model.id } : undefined,
-        agent: agent ?? undefined,
-        variant: variantManager.getCurrentVariant(chatId) ?? undefined,
-      });
+      const result = await withPromptTimeout(
+        opencodeClient.session.prompt(
+          {
+            sessionID: sessionId,
+            directory: sessionDirectory ?? undefined,
+            parts: [{ type: "text", text }],
+            model: model ? { providerID: model.providerId, modelID: model.id } : undefined,
+            agent: agent ?? undefined,
+            variant: variantManager.getCurrentVariant(chatId) ?? undefined,
+          },
+          { signal: promptController.signal },
+        ),
+        promptController,
+      );
 
       if (result.error) throw result.error;
 
@@ -163,11 +175,23 @@ export function registerPromptHandler(bot: MaxBot): void {
         });
       }
     } catch (error) {
+      if (promptController.signal.aborted) {
+        if (promptOperationManager.isCurrent(chatId, promptController)) {
+          clearChatWorkflowState(chatId);
+        }
+        return;
+      }
       logger.error("[Prompt] Error:", error);
       await bot.sendMessage(chatId, {
         text: "❌ Failed to send prompt.",
         attachments: [buildSessionPanel()],
       });
+    } finally {
+      promptOperationManager.clear(chatId, promptController);
     }
   });
+}
+
+async function withPromptTimeout<T>(promise: Promise<T>, controller: AbortController): Promise<T> {
+  return withTimeout(promise, PROMPT_TIMEOUT_MS, () => controller.abort());
 }
