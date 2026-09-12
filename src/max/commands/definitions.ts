@@ -6,6 +6,7 @@ export interface BotCommandDefinition {
 export const COMMAND_DEFINITIONS: BotCommandDefinition[] = [
   { command: "start", descriptionKey: "cmd.description.start" },
   { command: "help", descriptionKey: "cmd.description.help" },
+  { command: "menu", descriptionKey: "cmd.description.menu" },
   { command: "status", descriptionKey: "cmd.description.status" },
   { command: "new", descriptionKey: "cmd.description.new" },
   { command: "abort", descriptionKey: "cmd.description.abort" },

@@ -2,6 +2,7 @@ const dictionaries = {
   en: {
     "cmd.description.start": "Start the bot",
     "cmd.description.help": "Show available commands",
+    "cmd.description.menu": "Show session controls",
     "cmd.description.status": "Show current status",
     "cmd.description.new": "Create a new session",
     "cmd.description.abort": "Abort current session",
@@ -25,6 +26,7 @@ const dictionaries = {
   ru: {
     "cmd.description.start": "Запустить бота",
     "cmd.description.help": "Показать доступные команды",
+    "cmd.description.menu": "Показать панель управления сессией",
     "cmd.description.status": "Показать текущий статус",
     "cmd.description.new": "Создать новую сессию",
     "cmd.description.abort": "Прервать текущую сессию",

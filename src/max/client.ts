@@ -145,6 +145,11 @@ export interface MaxBotInfo {
   last_activity_time: number;
 }
 
+export interface MaxBotCommand {
+  name: string;
+  description: string;
+}
+
 export interface MaxUpdate {
   update_id: string;
   update_type: UpdateType;
@@ -335,6 +340,10 @@ export class MaxClient {
       last_activity_time: number;
     }>("GET", "/me");
     return { ...response, is_bot: true as const };
+  }
+
+  async setCommands(commands: MaxBotCommand[]): Promise<void> {
+    await this.request("PATCH", "/me/commands", { commands });
   }
 
   async sendMessage(userId: number, body: SendMessageBody): Promise<MaxMessage> {

@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import { readFile } from "node:fs/promises";
 
 import { createBot } from "../max/bot.js";
+import { maxClient } from "../max/client.js";
 import { config } from "../config.js";
 import { opencodeAutoRestartService } from "../opencode/auto-restart.js";
 import { settingsManager } from "../settings/manager.js";
@@ -16,6 +17,7 @@ import { SingleInstanceLock } from "../runtime/single-instance.js";
 // Command registrations
 import { registerStartCommand } from "../max/commands/start.js";
 import { registerHelpCommand } from "../max/commands/help.js";
+import { registerMenuCommand } from "../max/commands/menu.js";
 import { registerStatusCommand } from "../max/commands/status.js";
 import { registerNewCommand } from "../max/commands/new.js";
 import { registerAbortCommand } from "../max/commands/abort.js";
@@ -84,6 +86,7 @@ export async function startBotApp(): Promise<void> {
   // Register commands
   registerStartCommand(bot);
   registerHelpCommand(bot);
+  registerMenuCommand(bot);
   registerStatusCommand(bot);
   registerNewCommand(bot);
   registerAbortCommand(bot);
@@ -102,6 +105,10 @@ export async function startBotApp(): Promise<void> {
   registerModelsCommand(bot);
   registerOpencodeStartCommand(bot);
   registerOpencodeStopCommand(bot);
+
+  await maxClient.setCommands(
+    bot.getCommands().map(({ name, description }) => ({ name, description })),
+  );
 
   // Register handlers
   registerPromptHandler(bot);
