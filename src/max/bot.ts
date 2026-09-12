@@ -13,6 +13,7 @@ import { maxClient } from "./client.js";
 import { MaxTransport, normalizeMaxUpdate } from "./transport.js";
 import { MaxUpdateDispatcher } from "./update-dispatcher.js";
 import { interactionManager } from "../interaction/manager.js";
+import { clearChatWorkflowState } from "../interaction/reset.js";
 
 export type UpdateHandler = (update: MaxUpdate) => void | Promise<void>;
 
@@ -63,8 +64,13 @@ class MaxBot {
     },
     (_update, inbound) => {
       if (inbound.kind !== "message") return false;
-      if (!interactionManager.isActive(inbound.address.chatId)) return false;
-      const kind = interactionManager.getActive(inbound.address.chatId)?.kind;
+      const chatId = inbound.address.chatId;
+      const hadInteraction = interactionManager.getActive(chatId) !== null;
+      if (!interactionManager.isActive(chatId)) {
+        if (hadInteraction) clearChatWorkflowState(chatId);
+        return false;
+      }
+      const kind = interactionManager.getActive(chatId)?.kind;
       return kind === "rename" || kind === "question" || kind === "question_custom";
     },
   );
@@ -250,7 +256,9 @@ class MaxBot {
 
         for (const update of response.updates ?? []) {
           logger.debug(`[Bot] Processing update: ${update.update_type}`);
-          this.updateDispatcher.dispatch(update, (queuedUpdate) => this.processUpdate(queuedUpdate));
+          this.updateDispatcher.dispatch(update, (queuedUpdate) =>
+            this.processUpdate(queuedUpdate),
+          );
         }
       } catch (error) {
         if (!this.isRunning) break;

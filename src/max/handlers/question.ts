@@ -55,39 +55,96 @@ export async function replyToQuestion(chatId: number): Promise<void> {
   );
 
   if (result.error) throw result.error;
-  questionManager.clear(chatId);
-  interactionManager.clear(chatId);
+  if (questionManager.getRequestId(chatId) === requestID) {
+    questionManager.clear(chatId);
+    if (interactionManager.getActive(chatId)?.requestId === requestID) {
+      interactionManager.clear(chatId);
+    }
+  }
 }
 
 export function registerQuestionCallback(bot: MaxBot): void {
   bot.callback(
-    (data) => data.startsWith("q_option:") || data.startsWith("q_custom:") || data.startsWith("q_next:"),
+    (data) =>
+      data.startsWith("q_option:") || data.startsWith("q_custom:") || data.startsWith("q_next:"),
     async (userId, chatId, data, callback) => {
       const action = parseQuestionCallback(data);
-      if (!questionManager.isActive(chatId)) {
-        await bot.answerCallback(callback.callback_id, "Вопрос больше не активен.");
-        return;
-      }
-      if (!action || action.requestId !== questionManager.getRequestId(chatId)) {
-        await bot.answerCallback(callback.callback_id, "Этот вопрос уже устарел.");
-        return;
-      }
+      await bot.answerCallback(callback.callback_id, "⏳ Обрабатываю…");
+      await questionManager.runExclusive(chatId, async () => {
+        if (!questionManager.isActive(chatId)) {
+          await bot.sendMessage(chatId, { text: "Вопрос больше не активен." });
+          return;
+        }
+        if (!action || action.requestId !== questionManager.getRequestId(chatId)) {
+          await bot.sendMessage(chatId, { text: "Этот вопрос уже устарел." });
+          return;
+        }
 
-      const current = questionManager.getCurrentQuestion(chatId);
-      if (!current || action.index !== questionManager.getCurrentIndex(chatId)) {
-        await bot.answerCallback(callback.callback_id, "Этот вопрос уже устарел.");
-        return;
-      }
+        const current = questionManager.getCurrentQuestion(chatId);
+        if (!current || action.index !== questionManager.getCurrentIndex(chatId)) {
+          await bot.sendMessage(chatId, { text: "Этот вопрос уже устарел." });
+          return;
+        }
 
-      if (action.kind === "option") {
-        questionManager.selectOption(chatId, action.index, action.value);
-        await bot.answerCallback(callback.callback_id, `Выбрано: ${action.value}`);
+        if (action.kind === "option") {
+          questionManager.selectOption(chatId, action.index, action.value);
 
-        if (!current.multiple) {
-          const selected = questionManager.getSelectedOptions(chatId).get(action.index) ?? [];
-          if (selected.length > 0 && questionManager.nextQuestion(chatId)) {
+          if (!current.multiple) {
+            const selected = questionManager.getSelectedOptions(chatId).get(action.index) ?? [];
+            if (selected.length > 0 && questionManager.nextQuestion(chatId)) {
+              const next = questionManager.getCurrentQuestion(chatId);
+              if (next) {
+                await bot.sendMessage(chatId, {
+                  text: `❓ **${next.header ?? "Question"}**\n\n${next.question}`,
+                  format: "markdown",
+                  attachments: [
+                    buildQuestionOptionsKeyboard(
+                      next.options,
+                      next.multiple,
+                      questionManager.getRequestId(chatId) ?? "",
+                      questionManager.getCurrentIndex(chatId),
+                      next.custom,
+                    ),
+                  ],
+                });
+              }
+            } else if (selected.length > 0) {
+              try {
+                await replyToQuestion(chatId);
+              } catch (error) {
+                logger.error("[Question] Reply error:", error);
+                await bot.sendMessage(chatId, {
+                  text: "❌ Не удалось отправить ответ. Повторите выбор.",
+                });
+              }
+            }
+          }
+        }
+
+        if (action.kind === "custom") {
+          interactionManager.clear(chatId);
+          interactionManager.start(
+            chatId,
+            "question_custom",
+            questionManager.getActive(chatId)?.sessionId ?? "",
+            undefined,
+            action.requestId,
+          );
+          await bot.sendMessage(chatId, { text: "✏️ Type your answer:" });
+        }
+
+        if (action.kind === "next") {
+          if (questionManager.nextQuestion(chatId)) {
             const next = questionManager.getCurrentQuestion(chatId);
             if (next) {
+              interactionManager.clear(chatId);
+              interactionManager.start(
+                chatId,
+                "question",
+                questionManager.getActive(chatId)?.sessionId ?? "",
+                undefined,
+                action.requestId,
+              );
               await bot.sendMessage(chatId, {
                 text: `❓ **${next.header ?? "Question"}**\n\n${next.question}`,
                 format: "markdown",
@@ -95,67 +152,25 @@ export function registerQuestionCallback(bot: MaxBot): void {
                   buildQuestionOptionsKeyboard(
                     next.options,
                     next.multiple,
-                    questionManager.getRequestId(chatId) ?? "",
+                    action.requestId,
                     questionManager.getCurrentIndex(chatId),
                     next.custom,
                   ),
                 ],
               });
             }
-          } else if (selected.length > 0) {
+          } else {
             try {
               await replyToQuestion(chatId);
             } catch (error) {
               logger.error("[Question] Reply error:", error);
-              await bot.sendMessage(chatId, { text: "❌ Не удалось отправить ответ. Повторите выбор." });
+              await bot.sendMessage(chatId, {
+                text: "❌ Не удалось отправить ответы. Повторите действие.",
+              });
             }
           }
         }
-      }
-
-      if (action.kind === "custom") {
-        await bot.answerCallback(callback.callback_id);
-        interactionManager.clear(chatId);
-        interactionManager.start(
-          chatId,
-          "question_custom",
-          questionManager.getActive(chatId)?.sessionId ?? "",
-          undefined,
-          action.requestId,
-        );
-        await bot.sendMessage(chatId, { text: "✏️ Type your answer:" });
-      }
-
-      if (action.kind === "next") {
-        await bot.answerCallback(callback.callback_id);
-        if (questionManager.nextQuestion(chatId)) {
-          const next = questionManager.getCurrentQuestion(chatId);
-          if (next) {
-            interactionManager.clear(chatId);
-            interactionManager.start(chatId, "question", questionManager.getActive(chatId)?.sessionId ?? "", undefined, action.requestId);
-            await bot.sendMessage(chatId, {
-              text: `❓ **${next.header ?? "Question"}**\n\n${next.question}`,
-              format: "markdown",
-              attachments: [
-                buildQuestionOptionsKeyboard(
-                  next.options,
-                  next.multiple,
-                  action.requestId,
-                  questionManager.getCurrentIndex(chatId),
-                  next.custom,
-                ),
-              ],
-            });
-          }
-        } else {
-          try {
-            await replyToQuestion(chatId);
-          } catch (error) {
-            logger.error("[Question] Reply error:", error);
-            await bot.sendMessage(chatId, { text: "❌ Не удалось отправить ответы. Повторите действие." });
-          }
-        }
-      }
+      });
     },
   );
 }

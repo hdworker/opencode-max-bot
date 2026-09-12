@@ -55,4 +55,31 @@ describe("question state", () => {
     expect(questionManager.getAnswers(1)).toEqual([["answer one"]]);
     expect(questionManager.getAnswers(2)).toEqual([["answer two"]]);
   });
+
+  it("serializes callback work within one conversation", async () => {
+    const gate: { promise: Promise<void>; resolve: () => void } = (() => {
+      let resolve!: () => void;
+      const promise = new Promise<void>((res) => {
+        resolve = res;
+      });
+      return { promise, resolve };
+    })();
+    const calls: string[] = [];
+
+    const first = questionManager.runExclusive(1, async () => {
+      calls.push("first:start");
+      await gate.promise;
+      calls.push("first:end");
+    });
+    const second = questionManager.runExclusive(1, async () => {
+      calls.push("second");
+    });
+
+    await Promise.resolve();
+    expect(calls).toEqual(["first:start"]);
+
+    gate.resolve();
+    await Promise.all([first, second]);
+    expect(calls).toEqual(["first:start", "first:end", "second"]);
+  });
 });

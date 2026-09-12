@@ -55,12 +55,20 @@ export function registerPromptHandler(bot: MaxBot): void {
         (active?.kind === "question" || active?.kind === "question_custom") &&
         questionManager.isActive(chatId)
       ) {
-        const current = questionManager.getCurrentQuestion(chatId);
-        if (current) {
+        await questionManager.runExclusive(chatId, async () => {
+          const current = questionManager.getCurrentQuestion(chatId);
+          if (!current || questionManager.getRequestId(chatId) !== active.requestId) return;
+
           questionManager.setCustomAnswer(chatId, questionManager.getCurrentIndex(chatId), text);
           if (questionManager.nextQuestion(chatId)) {
             interactionManager.clear(chatId);
-            interactionManager.start(chatId, "question", active.sessionId, undefined, active.requestId);
+            interactionManager.start(
+              chatId,
+              "question",
+              active.sessionId,
+              undefined,
+              active.requestId,
+            );
             const next = questionManager.getCurrentQuestion(chatId);
             if (next) {
               await bot.sendMessage(chatId, {
@@ -94,17 +102,19 @@ export function registerPromptHandler(bot: MaxBot): void {
                   ),
                 ],
               });
-              interactionManager.clear(chatId);
-              interactionManager.start(
-                chatId,
-                "question_custom",
-                active.sessionId,
-                undefined,
-                active.requestId,
-              );
+              if (questionManager.getRequestId(chatId) === active.requestId) {
+                interactionManager.clear(chatId);
+                interactionManager.start(
+                  chatId,
+                  "question_custom",
+                  active.sessionId,
+                  undefined,
+                  active.requestId,
+                );
+              }
             }
           }
-        }
+        });
         return;
       }
     }

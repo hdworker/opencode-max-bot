@@ -21,10 +21,14 @@ interface ActiveQuestion {
   requestID: string;
   sessionId: string;
   messageIds: number[];
+  startedAt: number;
 }
+
+const QUESTION_TIMEOUT_MS = 15 * 60 * 1000;
 
 class QuestionManager {
   private active = new Map<number, ActiveQuestion>();
+  private callbackTails = new Map<number, Promise<void>>();
 
   start(chatId: number, questions: Question[], requestID: string, sessionId: string): void {
     this.active.set(chatId, {
@@ -35,11 +39,18 @@ class QuestionManager {
       requestID,
       sessionId,
       messageIds: [],
+      startedAt: Date.now(),
     });
   }
 
   isActive(chatId: number): boolean {
-    return this.active.has(chatId);
+    const active = this.active.get(chatId);
+    if (!active) return false;
+    if (Date.now() - active.startedAt > QUESTION_TIMEOUT_MS) {
+      this.active.delete(chatId);
+      return false;
+    }
+    return true;
   }
 
   getActive(chatId: number): ActiveQuestion | null {
@@ -122,6 +133,20 @@ class QuestionManager {
 
   clear(chatId: number): void {
     this.active.delete(chatId);
+  }
+
+  async runExclusive(chatId: number, task: () => Promise<void>): Promise<void> {
+    const previous = this.callbackTails.get(chatId) ?? Promise.resolve();
+    const current = previous.then(task, task);
+    this.callbackTails.set(chatId, current);
+
+    try {
+      await current;
+    } finally {
+      if (this.callbackTails.get(chatId) === current) {
+        this.callbackTails.delete(chatId);
+      }
+    }
   }
 }
 

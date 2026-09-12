@@ -76,6 +76,21 @@ async function handleEvent(bot: MaxBot, chatId: number, event: Event): Promise<v
         return;
       }
 
+      const activeQuestion = questionManager.getActive(chatId);
+      if (activeQuestion?.requestID === request.id) {
+        logger.debug(`[OpenCodeEvents] Ignoring duplicate question request: ${request.id}`);
+        return;
+      }
+      if (activeQuestion) {
+        logger.error(
+          `[OpenCodeEvents] Refusing to overwrite active question ${activeQuestion.requestID} with ${request.id}`,
+        );
+        await bot.sendMessage(chatId, {
+          text: "⚠️ Уже есть активный вопрос OpenCode. Завершите его перед новым запросом.",
+        });
+        return;
+      }
+
       questionManager.start(chatId, questions, request.id, request.sessionID);
       interactionManager.clear(chatId);
       interactionManager.start(chatId, "question", request.sessionID, undefined, request.id);
@@ -85,15 +100,15 @@ async function handleEvent(bot: MaxBot, chatId: number, event: Event): Promise<v
         await bot.sendMessage(chatId, {
           text: questionText(current),
           format: "markdown",
-        attachments: [
-          buildQuestionOptionsKeyboard(
-            current.options,
-            current.multiple,
-            request.id,
-            questionManager.getCurrentIndex(chatId),
-            current.custom,
-          ),
-        ],
+          attachments: [
+            buildQuestionOptionsKeyboard(
+              current.options,
+              current.multiple,
+              request.id,
+              questionManager.getCurrentIndex(chatId),
+              current.custom,
+            ),
+          ],
         });
       }
       return;
@@ -137,7 +152,7 @@ export function startMaxEventSubscription(bot: MaxBot, chatId: number, directory
     taskName: "opencode.events",
     task: () =>
       listener.start(directory, (event) => {
-        void handleEvent(bot, chatId, event).catch((error) => {
+        return handleEvent(bot, chatId, event).catch((error) => {
           logger.error("[OpenCodeEvents] Failed to handle event:", error);
         });
       }),
