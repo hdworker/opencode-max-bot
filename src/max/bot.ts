@@ -11,6 +11,7 @@ import type {
 } from "./client.js";
 import { maxClient } from "./client.js";
 import { MaxTransport, normalizeMaxUpdate } from "./transport.js";
+import { MaxUpdateDispatcher } from "./update-dispatcher.js";
 
 export type UpdateHandler = (update: MaxUpdate) => void | Promise<void>;
 
@@ -55,6 +56,9 @@ class MaxBot {
   private updateHandlers: UpdateHandler[] = [];
   private authUserId: number;
   private transport = new MaxTransport();
+  private updateDispatcher = new MaxUpdateDispatcher((error, update) => {
+    logger.error(`[Bot] Error processing update ${update.update_type}:`, error);
+  });
 
   constructor() {
     this.authUserId = config.max.allowedUserId;
@@ -233,7 +237,7 @@ class MaxBot {
 
         for (const update of response.updates ?? []) {
           logger.debug(`[Bot] Processing update: ${update.update_type}`);
-          await this.processUpdate(update);
+          this.updateDispatcher.dispatch(update, (queuedUpdate) => this.processUpdate(queuedUpdate));
         }
       } catch (error) {
         if (!this.isRunning) break;
