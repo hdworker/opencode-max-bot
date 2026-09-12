@@ -3,6 +3,7 @@ import { logger } from "../../utils/logger.js";
 import { opencodeClient } from "../../opencode/client.js";
 import { sessionManager } from "../../session/manager.js";
 import { settingsManager } from "../../settings/manager.js";
+import { buildMenuButton } from "./menu.js";
 
 export function registerStartCommand(bot: MaxBot): void {
   bot.command("start", "Start the bot", async (userId, chatId) => {
@@ -22,7 +23,11 @@ export function registerStartCommand(bot: MaxBot): void {
 
       text += "\nType /help to see available commands.";
 
-      await bot.sendMessage(chatId, { text, format: "markdown" });
+      await bot.sendMessage(chatId, {
+        text,
+        format: "markdown",
+        attachments: [buildMenuButton()],
+      });
     } catch (error) {
       logger.error("[Start] Error:", error);
       await bot.sendMessage(chatId, { text: "Error initializing bot." });
