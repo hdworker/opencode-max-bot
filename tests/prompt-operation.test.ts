@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { promptOperationManager } from "../src/max/prompt-operation.js";
 
 afterEach(() => {
+  vi.useRealTimers();
   promptOperationManager.cancel(101);
   promptOperationManager.cancel(202);
 });
@@ -26,5 +27,23 @@ describe("prompt operation isolation", () => {
     expect(promptOperationManager.isSessionActive("session-1")).toBe(false);
     expect(promptOperationManager.isSessionActive("session-2")).toBe(true);
     expect(second.signal.aborted).toBe(false);
+  });
+
+  it("expires an operation through its watchdog", () => {
+    vi.useFakeTimers();
+    const onTimeout = vi.fn();
+
+    promptOperationManager.start(101, "session-1", "/project", onTimeout, 1000);
+    vi.advanceTimersByTime(1000);
+
+    expect(onTimeout).toHaveBeenCalledOnce();
+    expect(promptOperationManager.isSessionActive("session-1")).toBe(false);
+  });
+
+  it("completes a session only once", () => {
+    const controller = promptOperationManager.start(101, "session-1");
+
+    expect(promptOperationManager.completeBySession("session-1", 101)?.controller).toBe(controller);
+    expect(promptOperationManager.completeBySession("session-1", 101)).toBeNull();
   });
 });

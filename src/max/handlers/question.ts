@@ -69,20 +69,21 @@ export function registerQuestionCallback(bot: MaxBot): void {
       data.startsWith("q_option:") || data.startsWith("q_custom:") || data.startsWith("q_next:"),
     async (userId, chatId, data, callback) => {
       const action = parseQuestionCallback(data);
-      await bot.answerCallback(callback.callback_id, "⏳ Обрабатываю…");
       await questionManager.runExclusive(chatId, async () => {
         if (!questionManager.isActive(chatId)) {
-          await bot.sendMessage(chatId, { text: "Вопрос больше не активен." });
+          await bot.answerCallback(callback.callback_id, "Ответ уже принят.");
           return;
         }
         if (!action || action.requestId !== questionManager.getRequestId(chatId)) {
-          await bot.sendMessage(chatId, { text: "Этот вопрос уже устарел." });
+          await bot.answerCallback(callback.callback_id, "Этот вопрос уже обработан.");
           return;
         }
 
+        await bot.answerCallback(callback.callback_id, "⏳ Обрабатываю…");
+
         const current = questionManager.getCurrentQuestion(chatId);
         if (!current || action.index !== questionManager.getCurrentIndex(chatId)) {
-          await bot.sendMessage(chatId, { text: "Этот вопрос уже устарел." });
+          await bot.answerCallback(callback.callback_id, "Этот вопрос уже обработан.");
           return;
         }
 

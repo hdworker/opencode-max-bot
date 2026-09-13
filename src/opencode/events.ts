@@ -7,7 +7,9 @@ export type EventCallback = (event: Event) => void | Promise<void>;
 
 const RECONNECT_BASE_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 15_000;
-const IDLE_TIMEOUT_MS = 30_000;
+// A long model/tool step can legitimately produce no SSE event for a while.
+// This is only a connection liveness threshold; it must not cancel a prompt.
+const IDLE_TIMEOUT_MS = 5 * 60_000;
 
 function reconnectDelay(attempt: number): number {
   return Math.min(RECONNECT_BASE_DELAY_MS * 2 ** Math.max(0, attempt - 1), RECONNECT_MAX_DELAY_MS);

@@ -9,13 +9,11 @@ import { agentManager } from "../../agent/manager.js";
 import { variantManager } from "../../variant/manager.js";
 import { logger } from "../../utils/logger.js";
 import { projectManager } from "../../project/manager.js";
-import { chunkText, renderText } from "../render/pipeline.js";
 import { startMaxEventSubscription } from "../event-handler.js";
 import { buildQuestionOptionsKeyboard } from "../utils/keyboard.js";
 import { replyToQuestion } from "./question.js";
 import { buildSessionPanel } from "../utils/session-panel.js";
 import { promptOperationManager } from "../prompt-operation.js";
-import { withTimeout } from "../../utils/with-timeout.js";
 import { clearChatWorkflowState } from "../../interaction/reset.js";
 import {
   classifyMaxApiFailure,
@@ -166,64 +164,44 @@ export function registerPromptHandler(bot: MaxBot): void {
       startMaxEventSubscription(bot, chatId, sessionDirectory);
     }
 
-    const promptController = promptOperationManager.start(chatId, sessionId);
+    const promptController = promptOperationManager.start(
+      chatId,
+      sessionId,
+      sessionDirectory ?? undefined,
+      () => {
+        clearChatWorkflowState(chatId);
+        void safeSendMessage(bot, chatId, {
+          text: "❌ OpenCode не завершил запрос за отведённое время. Запрос остановлен; попробуйте новую сессию.",
+          attachments: [buildSessionPanel()],
+        });
+      },
+      PROMPT_TIMEOUT_MS,
+    );
     try {
       await safeSendMessage(bot, chatId, { text: "⏳ Processing..." });
 
       const model = modelManager.getCurrentModelInfo(chatId);
       const agent = agentManager.getCurrentAgent(chatId);
 
-      const result = await withPromptTimeout(
-        opencodeClient.session.prompt(
-          {
-            sessionID: sessionId,
-            directory: sessionDirectory ?? undefined,
-            parts: [{ type: "text", text }],
-            model: model ? { providerID: model.providerId, modelID: model.id } : undefined,
-            agent: agent ?? undefined,
-            variant: variantManager.getCurrentVariant(chatId) ?? undefined,
-          },
-          { signal: promptController.signal },
-        ),
-        promptController,
+      const result = await opencodeClient.session.promptAsync(
+        {
+          sessionID: sessionId,
+          directory: sessionDirectory ?? undefined,
+          parts: [{ type: "text", text }],
+          model: model ? { providerID: model.providerId, modelID: model.id } : undefined,
+          agent: agent ?? undefined,
+          variant: variantManager.getCurrentVariant(chatId) ?? undefined,
+        },
+        { signal: promptController.signal },
       );
 
       if (result.error) throw result.error;
-
-      const responseText =
-        result.data?.parts
-          ?.filter((part) => part.type === "text")
-          .map((part) => part.text)
-          .join("\n\n")
-          .trim() ?? "";
-
-      if (!responseText) {
-        await safeSendMessage(bot, chatId, {
-          text: "✅ Done. Панель сессии:",
-          attachments: [buildSessionPanel()],
-        });
-        return;
-      }
-
-      const chunks = chunkText(renderText(responseText), MAX_RESPONSE_LENGTH);
-      for (const [index, chunk] of chunks.entries()) {
-        await safeSendMessage(bot, chatId, {
-          text: chunk,
-          format: "markdown",
-          ...(index === chunks.length - 1 ? { attachments: [buildSessionPanel()] } : {}),
-        });
-      }
+      await safeSendMessage(bot, chatId, {
+        text: "⏳ Запрос принят. OpenCode выполняет задачу...",
+        attachments: [buildSessionPanel()],
+      });
     } catch (error) {
-      if (promptController.signal.aborted) {
-        if (promptOperationManager.isCurrent(chatId, promptController)) {
-          clearChatWorkflowState(chatId);
-        }
-        if (promptController.signal.reason instanceof Error) {
-          await safeSendMessage(bot, chatId, {
-            text: promptFailureMessage("opencode-timeout"),
-            attachments: [buildSessionPanel()],
-          });
-        }
+      if (promptController.signal.aborted && !promptOperationManager.isCurrent(chatId, promptController)) {
         return;
       }
       const kind = classifyPromptFailure(error);
@@ -233,8 +211,6 @@ export function registerPromptHandler(bot: MaxBot): void {
         text: promptFailureMessage(kind),
         attachments: [buildSessionPanel()],
       });
-    } finally {
-      promptOperationManager.clear(chatId, promptController);
     }
   });
 }
@@ -249,10 +225,4 @@ async function safeSendMessage(
   } catch (error) {
     logger.error(`[Prompt] MAX status message failed (${classifyMaxApiFailure(error)}):`, error);
   }
-}
-
-async function withPromptTimeout<T>(promise: Promise<T>, controller: AbortController): Promise<T> {
-  return withTimeout(promise, PROMPT_TIMEOUT_MS, () =>
-    controller.abort(new Error("Prompt timeout")),
-  );
 }
