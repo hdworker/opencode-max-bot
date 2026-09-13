@@ -17,6 +17,13 @@ import { buildSessionPanel } from "../utils/session-panel.js";
 import { promptOperationManager } from "../prompt-operation.js";
 import { withTimeout } from "../../utils/with-timeout.js";
 import { clearChatWorkflowState } from "../../interaction/reset.js";
+import {
+  classifyMaxApiFailure,
+  classifyPromptFailure,
+  promptFailureMessage,
+} from "../prompt-errors.js";
+import { isPromptTooLong, MAX_PROMPT_LENGTH } from "../prompt-input.js";
+import { isSessionContextTooLarge } from "../session-guard.js";
 
 const PROMPT_TIMEOUT_MS = 15 * 60 * 1000;
 
@@ -133,13 +140,35 @@ export function registerPromptHandler(bot: MaxBot): void {
 
     if (!sessionId) return;
 
+    if (isPromptTooLong(text)) {
+      await safeSendMessage(bot, chatId, {
+        text: `❌ Сообщение слишком длинное: ${text.length} символов. Максимум для одного prompt — ${MAX_PROMPT_LENGTH}. Разбейте его на несколько сообщений или создайте новую сессию.`,
+      });
+      return;
+    }
+
+    if (promptOperationManager.isSessionActive(sessionId)) {
+      await safeSendMessage(bot, chatId, {
+        text: "⏳ Эта сессия уже обрабатывает запрос. Дождитесь завершения или используйте /abort.",
+      });
+      return;
+    }
+
+    if (await isSessionContextTooLarge(sessionId, sessionDirectory)) {
+      await safeSendMessage(bot, chatId, {
+        text: "⚠️ В этой сессии уже накопился очень большой контекст. Создайте новую сессию через /new, чтобы избежать таймаута OpenCode.",
+        attachments: [buildSessionPanel()],
+      });
+      return;
+    }
+
     if (sessionDirectory) {
       startMaxEventSubscription(bot, chatId, sessionDirectory);
     }
 
     const promptController = promptOperationManager.start(chatId, sessionId);
     try {
-      await bot.sendMessage(chatId, { text: "⏳ Processing..." });
+      await safeSendMessage(bot, chatId, { text: "⏳ Processing..." });
 
       const model = modelManager.getCurrentModelInfo(chatId);
       const agent = agentManager.getCurrentAgent(chatId);
@@ -169,7 +198,7 @@ export function registerPromptHandler(bot: MaxBot): void {
           .trim() ?? "";
 
       if (!responseText) {
-        await bot.sendMessage(chatId, {
+        await safeSendMessage(bot, chatId, {
           text: "✅ Done. Панель сессии:",
           attachments: [buildSessionPanel()],
         });
@@ -178,7 +207,7 @@ export function registerPromptHandler(bot: MaxBot): void {
 
       const chunks = chunkText(renderText(responseText), MAX_RESPONSE_LENGTH);
       for (const [index, chunk] of chunks.entries()) {
-        await bot.sendMessage(chatId, {
+        await safeSendMessage(bot, chatId, {
           text: chunk,
           format: "markdown",
           ...(index === chunks.length - 1 ? { attachments: [buildSessionPanel()] } : {}),
@@ -189,11 +218,19 @@ export function registerPromptHandler(bot: MaxBot): void {
         if (promptOperationManager.isCurrent(chatId, promptController)) {
           clearChatWorkflowState(chatId);
         }
+        if (promptController.signal.reason instanceof Error) {
+          await safeSendMessage(bot, chatId, {
+            text: promptFailureMessage("opencode-timeout"),
+            attachments: [buildSessionPanel()],
+          });
+        }
         return;
       }
-      logger.error("[Prompt] Error:", error);
-      await bot.sendMessage(chatId, {
-        text: "❌ Failed to send prompt.",
+      const kind = classifyPromptFailure(error);
+      logger.error(`[Prompt] ${kind}:`, error);
+      clearChatWorkflowState(chatId);
+      await safeSendMessage(bot, chatId, {
+        text: promptFailureMessage(kind),
         attachments: [buildSessionPanel()],
       });
     } finally {
@@ -202,6 +239,20 @@ export function registerPromptHandler(bot: MaxBot): void {
   });
 }
 
+async function safeSendMessage(
+  bot: MaxBot,
+  chatId: number,
+  body: Parameters<MaxBot["sendMessage"]>[1],
+): Promise<void> {
+  try {
+    await bot.sendMessage(chatId, body);
+  } catch (error) {
+    logger.error(`[Prompt] MAX status message failed (${classifyMaxApiFailure(error)}):`, error);
+  }
+}
+
 async function withPromptTimeout<T>(promise: Promise<T>, controller: AbortController): Promise<T> {
-  return withTimeout(promise, PROMPT_TIMEOUT_MS, () => controller.abort());
+  return withTimeout(promise, PROMPT_TIMEOUT_MS, () =>
+    controller.abort(new Error("Prompt timeout")),
+  );
 }

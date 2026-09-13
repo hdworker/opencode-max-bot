@@ -5,16 +5,23 @@ interface PromptOperation {
 
 class PromptOperationManager {
   private active = new Map<number, PromptOperation>();
+  private activeSessions = new Set<string>();
 
   start(chatId: number, sessionId: string): AbortController {
     this.cancel(chatId);
     const controller = new AbortController();
     this.active.set(chatId, { sessionId, controller });
+    this.activeSessions.add(sessionId);
     return controller;
+  }
+
+  isSessionActive(sessionId: string): boolean {
+    return this.activeSessions.has(sessionId);
   }
 
   clear(chatId: number, controller: AbortController): void {
     if (this.active.get(chatId)?.controller === controller) {
+      this.activeSessions.delete(this.active.get(chatId)?.sessionId ?? "");
       this.active.delete(chatId);
     }
   }
@@ -28,6 +35,7 @@ class PromptOperationManager {
     if (!operation) return;
     operation.controller.abort();
     this.active.delete(chatId);
+    this.activeSessions.delete(operation.sessionId);
   }
 }
 

@@ -18,6 +18,15 @@ export interface SendMessageBody {
   notify?: boolean;
 }
 
+export const MAX_MESSAGE_TEXT_LENGTH = 4000;
+
+export class MaxMessageTooLongError extends Error {
+  constructor(length: number) {
+    super(`MAX message exceeds ${MAX_MESSAGE_TEXT_LENGTH} characters: ${length}`);
+    this.name = "MaxMessageTooLongError";
+  }
+}
+
 export interface Attachment {
   type: string;
   payload?: Record<string, unknown>;
@@ -347,6 +356,7 @@ export class MaxClient {
   }
 
   async sendMessage(userId: number, body: SendMessageBody): Promise<MaxMessage> {
+    assertMessageLength(body);
     const response = await this.request<{ message: MaxMessage }>(
       "POST",
       `/messages?user_id=${userId}`,
@@ -356,6 +366,7 @@ export class MaxClient {
   }
 
   async sendMessageToChat(chatId: number, body: SendMessageBody): Promise<MaxMessage> {
+    assertMessageLength(body);
     const response = await this.request<{ message: MaxMessage }>(
       "POST",
       `/messages?chat_id=${chatId}`,
@@ -365,6 +376,7 @@ export class MaxClient {
   }
 
   async editMessage(messageId: string, body: Partial<SendMessageBody>): Promise<MaxMessage> {
+    assertMessageLength(body);
     const response = await this.request<{ message: MaxMessage }>(
       "PUT",
       `/messages/${messageId}`,
@@ -480,6 +492,12 @@ export class MaxClient {
 
   async deleteWebhook(): Promise<void> {
     await this.request("DELETE", "/subscriptions");
+  }
+}
+
+function assertMessageLength(body: Partial<SendMessageBody>): void {
+  if (typeof body.text === "string" && body.text.length > MAX_MESSAGE_TEXT_LENGTH) {
+    throw new MaxMessageTooLongError(body.text.length);
   }
 }
 
