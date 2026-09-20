@@ -27,6 +27,10 @@ const PROMPT_TIMEOUT_MS = 15 * 60 * 1000;
 
 const MAX_RESPONSE_LENGTH = 4000;
 
+export function buildPromptAcceptedStatus(): { text: string } {
+  return { text: "⏳ Запрос принят. OpenCode выполняет задачу..." };
+}
+
 export function registerPromptHandler(bot: MaxBot): void {
   bot.onMessage(async (userId, chatId, text, message) => {
     if (!text || text.startsWith("/")) return;
@@ -197,10 +201,7 @@ export function registerPromptHandler(bot: MaxBot): void {
 
       if (result.error) throw result.error;
       promptOperationManager.markAccepted(chatId, promptController);
-      const acceptedMessage: Parameters<MaxBot["sendMessage"]>[1] = {
-        text: "⏳ Запрос принят. OpenCode выполняет задачу...",
-        attachments: [buildSessionPanel()],
-      };
+      const acceptedMessage = buildPromptAcceptedStatus();
       if (processingMessage) {
         try {
           await bot.editMessage(processingMessage.message_id, acceptedMessage);
