@@ -5,6 +5,8 @@ export interface PromptOperation {
   controller: AbortController;
   startedAt: number;
   watchdog?: ReturnType<typeof setTimeout>;
+  phase: "running" | "finalizing";
+  accepted: boolean;
 }
 
 class PromptOperationManager {
@@ -26,6 +28,8 @@ class PromptOperationManager {
       directory,
       controller,
       startedAt: Date.now(),
+      phase: "running",
+      accepted: false,
     };
     operation.watchdog = setTimeout(() => {
       if (this.active.get(chatId) !== operation) return;
@@ -47,6 +51,30 @@ class PromptOperationManager {
   getBySession(sessionId: string): PromptOperation | null {
     for (const operation of this.active.values()) {
       if (operation.sessionId === sessionId) return operation;
+    }
+    return null;
+  }
+
+  getByDirectory(directory: string): PromptOperation[] {
+    return Array.from(this.active.values()).filter(
+      (operation) => operation.directory === directory && operation.accepted,
+    );
+  }
+
+  markAccepted(chatId: number, controller: AbortController): boolean {
+    const operation = this.active.get(chatId);
+    if (operation?.controller !== controller) return false;
+    operation.accepted = true;
+    return true;
+  }
+
+  beginFinalization(sessionId: string, chatId?: number): PromptOperation | null {
+    for (const operation of this.active.values()) {
+      if (operation.sessionId !== sessionId) continue;
+      if (chatId !== undefined && chatId !== operation.chatId) continue;
+      if (operation.phase !== "running") return null;
+      operation.phase = "finalizing";
+      return operation;
     }
     return null;
   }

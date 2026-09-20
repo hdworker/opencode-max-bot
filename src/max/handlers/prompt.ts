@@ -178,7 +178,7 @@ export function registerPromptHandler(bot: MaxBot): void {
       PROMPT_TIMEOUT_MS,
     );
     try {
-      await safeSendMessage(bot, chatId, { text: "⏳ Processing..." });
+      const processingMessage = await safeSendMessage(bot, chatId, { text: "⏳ Processing..." });
 
       const model = modelManager.getCurrentModelInfo(chatId);
       const agent = agentManager.getCurrentAgent(chatId);
@@ -196,10 +196,21 @@ export function registerPromptHandler(bot: MaxBot): void {
       );
 
       if (result.error) throw result.error;
-      await safeSendMessage(bot, chatId, {
+      promptOperationManager.markAccepted(chatId, promptController);
+      const acceptedMessage: Parameters<MaxBot["sendMessage"]>[1] = {
         text: "⏳ Запрос принят. OpenCode выполняет задачу...",
         attachments: [buildSessionPanel()],
-      });
+      };
+      if (processingMessage) {
+        try {
+          await bot.editMessage(processingMessage.message_id, acceptedMessage);
+        } catch (error) {
+          logger.warn("[Prompt] Failed to update processing status:", error);
+          await safeSendMessage(bot, chatId, acceptedMessage);
+        }
+      } else {
+        await safeSendMessage(bot, chatId, acceptedMessage);
+      }
     } catch (error) {
       if (promptController.signal.aborted && !promptOperationManager.isCurrent(chatId, promptController)) {
         return;
@@ -219,10 +230,11 @@ async function safeSendMessage(
   bot: MaxBot,
   chatId: number,
   body: Parameters<MaxBot["sendMessage"]>[1],
-): Promise<void> {
+): Promise<Awaited<ReturnType<MaxBot["sendMessage"]>> | null> {
   try {
-    await bot.sendMessage(chatId, body);
+    return await bot.sendMessage(chatId, body);
   } catch (error) {
     logger.error(`[Prompt] MAX status message failed (${classifyMaxApiFailure(error)}):`, error);
+    return null;
   }
 }

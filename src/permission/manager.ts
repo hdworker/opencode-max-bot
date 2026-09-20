@@ -61,6 +61,12 @@ class PermissionManager {
       if (request.chatId === chatId) this.remove(request.id);
     }
   }
+
+  clearForSession(chatId: number, sessionId: string): void {
+    for (const request of this.requests.values()) {
+      if (request.chatId === chatId && request.sessionId === sessionId) this.remove(request.id);
+    }
+  }
 }
 
 export const permissionManager = new PermissionManager();

@@ -46,4 +46,23 @@ describe("prompt operation isolation", () => {
     expect(promptOperationManager.completeBySession("session-1", 101)?.controller).toBe(controller);
     expect(promptOperationManager.completeBySession("session-1", 101)).toBeNull();
   });
+
+  it("claims finalization only once while retaining the operation for cleanup", () => {
+    const controller = promptOperationManager.start(101, "session-1", "/project");
+
+    expect(promptOperationManager.beginFinalization("session-1", 101)?.controller).toBe(controller);
+    expect(promptOperationManager.beginFinalization("session-1", 101)).toBeNull();
+    expect(promptOperationManager.isSessionActive("session-1")).toBe(true);
+
+    promptOperationManager.clear(101, controller);
+    expect(promptOperationManager.isSessionActive("session-1")).toBe(false);
+  });
+
+  it("exposes only accepted operations for reconnect reconciliation", () => {
+    const controller = promptOperationManager.start(101, "session-1", "/project");
+    expect(promptOperationManager.getByDirectory("/project")).toHaveLength(0);
+
+    expect(promptOperationManager.markAccepted(101, controller)).toBe(true);
+    expect(promptOperationManager.getByDirectory("/project")).toHaveLength(1);
+  });
 });

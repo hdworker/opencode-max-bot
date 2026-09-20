@@ -17,6 +17,8 @@ import { clearChatWorkflowState } from "../interaction/reset.js";
 
 const FINAL_MESSAGE_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_LENGTH = 4000;
+const FINAL_MESSAGE_RETRIES = 2;
+const FINAL_MESSAGE_RETRY_DELAY_MS = 1_000;
 
 const listenersByChat = new Map<number, OpenCodeEventListener>();
 
@@ -30,24 +32,16 @@ function questionText(question: Question): string {
   return text;
 }
 
-async function handleEvent(bot: MaxBot, chatId: number, event: Event): Promise<void> {
+export async function handleEvent(bot: MaxBot, chatId: number, event: Event): Promise<void> {
   switch (event.type) {
     case "session.idle": {
-      const operation = promptOperationManager.completeBySession(event.properties.sessionID, chatId);
+      const operation = promptOperationManager.beginFinalization(event.properties.sessionID, chatId);
       if (!operation) return;
 
       try {
-        const result = await withTimeout(
-          opencodeClient.session.messages({
-            sessionID: operation.sessionId,
-            directory: operation.directory,
-            limit: 100,
-          }),
-          FINAL_MESSAGE_TIMEOUT_MS,
-        );
-        if (result.error) throw result.error;
+        const messages = await readCompletedSessionMessages(operation);
 
-        const responseText = getLatestAssistantText(result.data);
+        const responseText = getLatestAssistantText(messages);
         if (!responseText) {
           await safeSendMessage(bot, chatId, {
             text: "✅ Готово. Панель сессии:",
@@ -71,7 +65,10 @@ async function handleEvent(bot: MaxBot, chatId: number, event: Event): Promise<v
           attachments: [buildSessionPanel()],
         });
       }
-      clearChatWorkflowState(chatId);
+      finally {
+        promptOperationManager.clear(chatId, operation.controller);
+        clearCompletedWorkflow(chatId, operation.sessionId);
+      }
       return;
     }
 
@@ -185,28 +182,93 @@ async function handleEvent(bot: MaxBot, chatId: number, event: Event): Promise<v
   }
 }
 
+async function readCompletedSessionMessages(operation: {
+  sessionId: string;
+  directory?: string;
+}): Promise<unknown> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= FINAL_MESSAGE_RETRIES; attempt++) {
+    try {
+      const result = await withTimeout(
+        opencodeClient.session.messages({
+          sessionID: operation.sessionId,
+          directory: operation.directory,
+          limit: 100,
+        }),
+        FINAL_MESSAGE_TIMEOUT_MS,
+      );
+      if (result.error) throw result.error;
+      return result.data;
+    } catch (error) {
+      lastError = error;
+      if (attempt < FINAL_MESSAGE_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, FINAL_MESSAGE_RETRY_DELAY_MS * attempt));
+      }
+    }
+  }
+  throw lastError;
+}
+
+function clearCompletedWorkflow(chatId: number, sessionId: string): void {
+  if (interactionManager.getActive(chatId)?.sessionId === sessionId) {
+    interactionManager.clear(chatId);
+  }
+  if (questionManager.getActive(chatId)?.sessionId === sessionId) {
+    questionManager.clear(chatId);
+  }
+  permissionManager.clearForSession(chatId, sessionId);
+}
+
 export function getLatestAssistantText(messages: unknown): string {
   if (!Array.isArray(messages)) return "";
-  const assistants = messages.filter(
-    (message): message is {
-      type: "assistant";
-      time?: { created?: number };
-      content?: Array<{ type?: string; text?: string }>;
-    } =>
-      typeof message === "object" &&
-      message !== null &&
-      (message as { type?: unknown }).type === "assistant",
-  );
+  const assistants = messages.filter((message) => {
+    const info = getMessageInfo(message);
+    return info?.type === "assistant" || info?.role === "assistant";
+  });
   const latest = assistants.sort(
-    (left, right) => (left.time?.created ?? 0) - (right.time?.created ?? 0),
+    (left, right) => getMessageCreatedAt(left) - getMessageCreatedAt(right),
   ).at(-1);
-  return (
-    latest?.content
-      ?.filter((part) => part.type === "text" && typeof part.text === "string")
-      .map((part) => part.text)
-      .join("\n\n")
-      .trim() ?? ""
-  );
+
+  return getTextParts(latest).join("\n\n").trim();
+}
+
+type MessageRecord = Record<string, unknown>;
+
+function getMessageInfo(message: unknown): MessageRecord | null {
+  if (typeof message !== "object" || message === null) return null;
+  const record = message as MessageRecord;
+  if (typeof record.info === "object" && record.info !== null) {
+    return record.info as MessageRecord;
+  }
+  return record;
+}
+
+function getMessageCreatedAt(message: unknown): number {
+  const info = getMessageInfo(message);
+  const time = info?.time;
+  if (typeof time === "object" && time !== null) {
+    const created = (time as MessageRecord).created;
+    if (typeof created === "number") return created;
+  }
+  return 0;
+}
+
+function getTextParts(message: unknown): string[] {
+  if (typeof message !== "object" || message === null) return [];
+  const record = message as MessageRecord;
+  const info = getMessageInfo(message);
+  const parts = Array.isArray(record.parts)
+    ? record.parts
+    : Array.isArray(record.content)
+      ? record.content
+      : Array.isArray(info?.content)
+        ? info.content
+        : [];
+
+  return parts
+    .filter((part): part is MessageRecord => typeof part === "object" && part !== null)
+    .filter((part) => part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text as string);
 }
 
 async function safeSendMessage(
@@ -241,12 +303,37 @@ export function startMaxEventSubscription(bot: MaxBot, chatId: number, directory
   safeBackgroundTask({
     taskName: "opencode.events",
     task: () =>
-      listener.start(directory, (event) => {
-        return handleEvent(bot, chatId, event).catch((error) => {
-          logger.error("[OpenCodeEvents] Failed to handle event:", error);
-        });
-      }),
+      listener.start(
+        directory,
+        (event) => {
+          return handleEvent(bot, chatId, event).catch((error) => {
+            logger.error("[OpenCodeEvents] Failed to handle event:", error);
+          });
+        },
+        () => reconcileActiveSessions(bot, chatId, directory),
+      ),
   });
+}
+
+async function reconcileActiveSessions(bot: MaxBot, chatId: number, directory: string): Promise<void> {
+  const operations = promptOperationManager.getByDirectory(directory);
+  if (operations.length === 0) return;
+
+  try {
+    const result = await withTimeout(opencodeClient.session.status({ directory }), 2_000);
+    if (result.error) throw result.error;
+    for (const operation of operations) {
+      if (result.data[operation.sessionId]?.type === "idle") {
+        await handleEvent(bot, chatId, {
+          id: `reconciled:${operation.sessionId}`,
+          type: "session.idle",
+          properties: { sessionID: operation.sessionId },
+        });
+      }
+    }
+  } catch (error) {
+    logger.warn("[OpenCodeEvents] Failed to reconcile sessions after reconnect:", error);
+  }
 }
 
 export function stopMaxEventSubscription(): void {

@@ -4,6 +4,7 @@ import { isExpectedOpencodeUnavailableError } from "../utils/opencode-error.js";
 import { logger } from "../utils/logger.js";
 
 export type EventCallback = (event: Event) => void | Promise<void>;
+export type ReconnectCallback = () => void | Promise<void>;
 
 const RECONNECT_BASE_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 15_000;
@@ -59,11 +60,11 @@ export class OpenCodeEventListener {
   private controller: AbortController | null = null;
   private running: Promise<void> | null = null;
 
-  start(directory: string, callback: EventCallback): Promise<void> {
+  start(directory: string, callback: EventCallback, onReconnect?: ReconnectCallback): Promise<void> {
     this.stop();
     const controller = new AbortController();
     this.controller = controller;
-    this.running = this.run(directory, callback, controller);
+    this.running = this.run(directory, callback, controller, onReconnect);
     return this.running;
   }
 
@@ -77,8 +78,10 @@ export class OpenCodeEventListener {
     directory: string,
     callback: EventCallback,
     controller: AbortController,
+    onReconnect?: ReconnectCallback,
   ): Promise<void> {
     let attempt = 0;
+    let connected = false;
 
     while (!controller.signal.aborted) {
       try {
@@ -92,6 +95,8 @@ export class OpenCodeEventListener {
           );
           if (!result.stream) throw new Error("OpenCode event subscription returned no stream");
           attempt = 0;
+          if (connected) await onReconnect?.();
+          connected = true;
 
           while (!controller.signal.aborted) {
             const next = await readWithTimeout(
