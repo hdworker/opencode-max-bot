@@ -23,8 +23,6 @@ import {
 import { isPromptTooLong, MAX_PROMPT_LENGTH } from "../prompt-input.js";
 import { isSessionContextTooLarge } from "../session-guard.js";
 
-const PROMPT_TIMEOUT_MS = 15 * 60 * 1000;
-
 const MAX_RESPONSE_LENGTH = 4000;
 
 export function buildPromptAcceptedStatus(): { text: string } {
@@ -172,14 +170,6 @@ export function registerPromptHandler(bot: MaxBot): void {
       chatId,
       sessionId,
       sessionDirectory ?? undefined,
-      () => {
-        clearChatWorkflowState(chatId);
-        void safeSendMessage(bot, chatId, {
-          text: "❌ OpenCode не завершил запрос за отведённое время. Запрос остановлен; попробуйте новую сессию.",
-          attachments: [buildSessionPanel()],
-        });
-      },
-      PROMPT_TIMEOUT_MS,
     );
     try {
       const processingMessage = await safeSendMessage(bot, chatId, { text: "⏳ Processing..." });

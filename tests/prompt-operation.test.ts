@@ -29,15 +29,15 @@ describe("prompt operation isolation", () => {
     expect(second.signal.aborted).toBe(false);
   });
 
-  it("expires an operation through its watchdog", () => {
+  it("keeps an operation active regardless of how long OpenCode runs", () => {
     vi.useFakeTimers();
-    const onTimeout = vi.fn();
+    const controller = promptOperationManager.start(101, "session-1", "/project");
 
-    promptOperationManager.start(101, "session-1", "/project", onTimeout, 1000);
-    vi.advanceTimersByTime(1000);
+    vi.advanceTimersByTime(15 * 60 * 1000);
 
-    expect(onTimeout).toHaveBeenCalledOnce();
-    expect(promptOperationManager.isSessionActive("session-1")).toBe(false);
+    expect(controller.signal.aborted).toBe(false);
+    expect(promptOperationManager.isSessionActive("session-1")).toBe(true);
+    promptOperationManager.clear(101, controller);
   });
 
   it("completes a session only once", () => {

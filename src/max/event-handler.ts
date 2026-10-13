@@ -15,7 +15,6 @@ import { withTimeout } from "../utils/with-timeout.js";
 import { opencodeClient } from "../opencode/client.js";
 import { clearChatWorkflowState } from "../interaction/reset.js";
 
-const FINAL_MESSAGE_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_LENGTH = 4000;
 const FINAL_MESSAGE_RETRIES = 2;
 const FINAL_MESSAGE_RETRY_DELAY_MS = 1_000;
@@ -189,14 +188,11 @@ async function readCompletedSessionMessages(operation: {
   let lastError: unknown;
   for (let attempt = 1; attempt <= FINAL_MESSAGE_RETRIES; attempt++) {
     try {
-      const result = await withTimeout(
-        opencodeClient.session.messages({
-          sessionID: operation.sessionId,
-          directory: operation.directory,
-          limit: 100,
-        }),
-        FINAL_MESSAGE_TIMEOUT_MS,
-      );
+      const result = await opencodeClient.session.messages({
+        sessionID: operation.sessionId,
+        directory: operation.directory,
+        limit: 100,
+      });
       if (result.error) throw result.error;
       return result.data;
     } catch (error) {

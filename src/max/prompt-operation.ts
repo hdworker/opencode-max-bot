@@ -4,7 +4,6 @@ export interface PromptOperation {
   directory?: string;
   controller: AbortController;
   startedAt: number;
-  watchdog?: ReturnType<typeof setTimeout>;
   phase: "running" | "finalizing";
   accepted: boolean;
 }
@@ -17,8 +16,6 @@ class PromptOperationManager {
     chatId: number,
     sessionId: string,
     directory?: string,
-    onTimeout?: (operation: PromptOperation) => void,
-    timeoutMs = 15 * 60 * 1000,
   ): AbortController {
     this.cancel(chatId);
     const controller = new AbortController();
@@ -31,14 +28,6 @@ class PromptOperationManager {
       phase: "running",
       accepted: false,
     };
-    operation.watchdog = setTimeout(() => {
-      if (this.active.get(chatId) !== operation) return;
-      this.active.delete(chatId);
-      this.activeSessions.delete(sessionId);
-      controller.abort(new Error("Prompt watchdog timeout"));
-      onTimeout?.(operation);
-    }, timeoutMs);
-    operation.watchdog.unref?.();
     this.active.set(chatId, operation);
     this.activeSessions.add(sessionId);
     return controller;
@@ -82,7 +71,6 @@ class PromptOperationManager {
   clear(chatId: number, controller: AbortController): void {
     if (this.active.get(chatId)?.controller === controller) {
       const operation = this.active.get(chatId);
-      if (operation?.watchdog) clearTimeout(operation.watchdog);
       this.activeSessions.delete(operation?.sessionId ?? "");
       this.active.delete(chatId);
     }
@@ -92,7 +80,6 @@ class PromptOperationManager {
     for (const [chatId, operation] of this.active) {
       if (operation.sessionId !== sessionId) continue;
       if (chatId !== undefined && chatId !== operation.chatId) continue;
-      if (operation.watchdog) clearTimeout(operation.watchdog);
       this.active.delete(chatId);
       this.activeSessions.delete(sessionId);
       return operation;
@@ -107,7 +94,6 @@ class PromptOperationManager {
   cancel(chatId: number): void {
     const operation = this.active.get(chatId);
     if (!operation) return;
-    if (operation.watchdog) clearTimeout(operation.watchdog);
     operation.controller.abort();
     this.active.delete(chatId);
     this.activeSessions.delete(operation.sessionId);
