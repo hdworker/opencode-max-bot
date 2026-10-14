@@ -79,7 +79,7 @@ export async function startBotApp(): Promise<void> {
   logger.info(`Allowed User ID: ${config.max.allowedUserId}`);
   logger.debug(`[Runtime] Application start mode: ${mode}`);
 
-  await settingsManager.init(true);
+  settingsManager.init();
 
   const bot = createBot();
 

@@ -1,12 +1,14 @@
-import { appendFileSync, mkdirSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { config } from "../config.js";
+import { getRuntimePaths } from "../runtime/paths.js";
 
 const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 } as const;
 
 type LogLevel = keyof typeof LOG_LEVELS;
 
 let logFilePath = "";
+let logDirectoryChecked = false;
 let currentLevel: LogLevel = config.server.logLevel as LogLevel;
 
 export async function initializeLogger(): Promise<void> {
@@ -14,11 +16,17 @@ export async function initializeLogger(): Promise<void> {
 }
 
 function ensureLogDir(): void {
-  if (logFilePath || !existsSync(".")) return;
-  const logsDir = join(process.cwd(), "logs");
-  if (!existsSync(logsDir)) {
+  if (logDirectoryChecked) return;
+  logDirectoryChecked = true;
+
+  const logsDir = getRuntimePaths().logDirPath;
+  try {
     mkdirSync(logsDir, { recursive: true });
+  } catch {
+    // File logging is optional; stdout/stderr remain available to systemd.
+    return;
   }
+
   const now = new Date();
   const date = now.toISOString().slice(0, 10).replace(/-/g, "-");
   const time = now.toISOString().slice(11, 19).replace(/:/g, "-");

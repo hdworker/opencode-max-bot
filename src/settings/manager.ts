@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { dirname } from "node:path";
 import { logger } from "../utils/logger.js";
+import { getRuntimePaths } from "../runtime/paths.js";
 
 export interface SettingsData {
   currentProject: string | null;
@@ -23,8 +24,6 @@ export interface ConversationSettings {
   sessionDirectoryCache: Record<string, string>;
 }
 
-const SETTINGS_FILE = "settings.json";
-
 class SettingsManager {
   private data: SettingsData = {
     currentProject: null,
@@ -41,9 +40,8 @@ class SettingsManager {
   private filePath = "";
   private writeQueue: Promise<void> = Promise.resolve();
 
-  init(runningFromSources: boolean): void {
-    const baseDir = runningFromSources ? process.cwd() : process.cwd();
-    this.filePath = join(baseDir, SETTINGS_FILE);
+  init(): void {
+    this.filePath = getRuntimePaths().settingsFilePath;
     this.load();
   }
 

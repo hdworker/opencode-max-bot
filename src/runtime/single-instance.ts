@@ -1,11 +1,12 @@
 import { closeSync, existsSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { getRuntimePaths } from "./paths.js";
 
 const LOCK_FILE = ".opencode-max-bot.lock";
 
 export class SingleInstanceLock {
   private descriptor: number | null = null;
-  private readonly path = join(process.cwd(), LOCK_FILE);
+  private readonly path = join(getRuntimePaths().dataDirPath, LOCK_FILE);
 
   acquire(): void {
     try {

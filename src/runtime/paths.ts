@@ -1,6 +1,7 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 export interface RuntimePaths {
+  dataDirPath: string;
   envFilePath: string;
   settingsFilePath: string;
   logDirPath: string;
@@ -13,9 +14,11 @@ export function getRuntimePaths(): RuntimePaths {
     return paths;
   }
 
-  const baseDir = process.cwd();
+  const configuredDataDir = process.env.OPENCODE_MAX_BOT_DATA_DIR?.trim();
+  const baseDir = configuredDataDir ? resolve(configuredDataDir) : process.cwd();
   paths = {
-    envFilePath: join(baseDir, ".env"),
+    dataDirPath: baseDir,
+    envFilePath: join(process.cwd(), ".env"),
     settingsFilePath: join(baseDir, "settings.json"),
     logDirPath: join(baseDir, "logs"),
   };
