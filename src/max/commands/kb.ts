@@ -2,6 +2,8 @@ import type { MaxBot } from "../bot.js";
 import { logger } from "../../utils/logger.js";
 import { config } from "../../config.js";
 import { ingestArticleFromMax } from "../../kb/article-processor.js";
+import type { ArticleFileAttachment } from "../../kb/article-input.js";
+import type { MaxMessage } from "../client.js";
 
 export function registerKnowledgeBaseCommand(bot: MaxBot): void {
   bot.command("kb", "Add an article to the knowledge base", async (_userId, chatId, _text, args, message) => {
@@ -12,9 +14,10 @@ export function registerKnowledgeBaseCommand(bot: MaxBot): void {
       return;
     }
 
-    if (!args.trim()) {
+    const attachment = getArticleAttachment(message);
+    if (!args.trim() && !attachment) {
       await bot.sendMessage(chatId, {
-        text: "Формат: /kb <ссылка или текст статьи>. Для ссылки бот загрузит статью, попросит локальный OpenCode сделать конспект и добавит материал в базу знаний.",
+        text: "Формат: /kb <ссылка или текст статьи>. Если сайт блокирует загрузку, приложите сохранённый файл .txt, .md или .html к команде /kb <ссылка на оригинал>.",
       });
       return;
     }
@@ -27,7 +30,7 @@ export function registerKnowledgeBaseCommand(bot: MaxBot): void {
     }
 
     try {
-      const result = await ingestArticleFromMax(args, chatId, message.message_id);
+      const result = await ingestArticleFromMax(args, chatId, message.message_id, attachment);
       const status = result.updated ? "обновлена" : "добавлена";
       const summary = result.summarized ? "Конспект OpenCode сохранён." : "Сохранён исходный текст без конспекта.";
       const text = `✅ Статья ${status}: ${result.title}\n${summary}\nИсточник: ${result.source} · фрагментов для поиска: ${result.chunks}`;
@@ -38,6 +41,18 @@ export function registerKnowledgeBaseCommand(bot: MaxBot): void {
       await replyWithStatus(bot, chatId, statusMessage?.message_id, { text: `❌ Не удалось добавить статью.\n${detail}` });
     }
   });
+}
+
+function getArticleAttachment(message: MaxMessage): ArticleFileAttachment | undefined {
+  for (const item of message.body.attachments ?? []) {
+    if (!item || typeof item !== "object") continue;
+    const attachment = item as { type?: unknown; payload?: unknown };
+    if (attachment.type !== "file" || !attachment.payload || typeof attachment.payload !== "object") continue;
+    const payload = attachment.payload as { url?: unknown; filename?: unknown };
+    if (typeof payload.url !== "string" || typeof payload.filename !== "string") continue;
+    return { url: payload.url, filename: payload.filename };
+  }
+  return undefined;
 }
 
 async function replyWithStatus(

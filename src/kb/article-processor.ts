@@ -2,7 +2,7 @@ import { config } from "../config.js";
 import { openCodeWorkspace } from "../opencode/workspace.js";
 import { withTimeout } from "../utils/with-timeout.js";
 import { logger } from "../utils/logger.js";
-import { prepareArticle } from "./article-input.js";
+import { prepareArticle, type ArticleFileAttachment } from "./article-input.js";
 
 const INGEST_TIMEOUT_MS = 30_000;
 
@@ -18,12 +18,13 @@ export async function ingestArticleFromMax(
   input: string,
   chatId: number,
   messageId: string,
+  attachment?: ArticleFileAttachment,
 ): Promise<IngestedArticle> {
   if (!config.knowledgeBase.ingestToken) {
     throw new Error("Приём статей не настроен: задайте KB_INGEST_TOKEN для бота.");
   }
 
-  const article = await prepareArticle(input);
+  const article = await prepareArticle(input, attachment);
   let summary = "";
   if (config.knowledgeBase.summarizeWithOpenCode) {
     try {

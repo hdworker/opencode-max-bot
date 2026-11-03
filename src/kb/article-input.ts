@@ -14,6 +14,11 @@ export interface PreparedArticle {
   content: string;
 }
 
+export interface ArticleFileAttachment {
+  url: string;
+  filename: string;
+}
+
 interface DownloadedResponse {
   statusCode: number;
   headers: import("node:http").IncomingHttpHeaders;
@@ -127,6 +132,11 @@ async function downloadArticle(startUrl: URL): Promise<{ title: string; content:
       continue;
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
+      if (response.statusCode === 429) {
+        throw new Error(
+          "Сайт ограничил автоматическую загрузку (HTTP 429). Попробуйте позже или отправьте сохранённую копию статьи файлом .txt, .md или .html вместе с командой /kb и исходной ссылкой.",
+        );
+      }
       throw new Error(`Сайт вернул HTTP ${response.statusCode}.`);
     }
 
@@ -156,6 +166,68 @@ async function downloadArticle(startUrl: URL): Promise<{ title: string; content:
   }
 
   throw new Error("Не удалось загрузить статью.");
+}
+
+async function downloadArticleFile(attachment: ArticleFileAttachment): Promise<PreparedArticle> {
+  const filename = attachment.filename.replace(/[\\/]/g, "").trim();
+  const extension = filename.toLowerCase().match(/\.(txt|md|markdown|html|htm)$/)?.[1];
+  if (!extension) {
+    throw new Error("Для загрузки приложите текстовый файл .txt, .md или .html.");
+  }
+
+  let url: URL;
+  try {
+    url = new URL(attachment.url);
+  } catch {
+    throw new Error("Не удалось открыть приложенный файл из MAX.");
+  }
+
+  for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new Error("Ссылка на приложенный файл должна использовать HTTP или HTTPS.");
+    }
+    if (url.username || url.password) throw new Error("Ссылка на приложенный файл некорректна.");
+
+    const address = await resolvePublicIpv4(url);
+    const response = await downloadOnce(url, address);
+    const location = response.headers.location;
+    if ([301, 302, 303, 307, 308].includes(response.statusCode) && location) {
+      if (redirects === MAX_REDIRECTS) throw new Error("Слишком много перенаправлений при загрузке файла.");
+      url = new URL(location, url);
+      continue;
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw new Error(`Не удалось скачать приложенный файл: HTTP ${response.statusCode}.`);
+    }
+
+    const contentTypeHeader = response.headers["content-type"];
+    const contentType = (Array.isArray(contentTypeHeader) ? contentTypeHeader[0] : contentTypeHeader) ?? "";
+    const isHtml = /\.(html|htm)$/.test(extension) || /^(text\/html|application\/xhtml\+xml)(?:\s*;|$)/i.test(contentType);
+    const isTextMime = /^(text\/(plain|markdown|html)|application\/(xhtml\+xml|octet-stream))(?:\s*;|$)/i.test(contentType);
+    if (!isTextMime) {
+      throw new Error("Вложение должно быть текстовым файлом .txt, .md или .html; PDF пока не поддерживается.");
+    }
+
+    const charset = contentType.match(/charset\s*=\s*["']?([^;"'\s]+)/i)?.[1] ?? "utf-8";
+    let rawText: string;
+    try {
+      rawText = new TextDecoder(charset).decode(response.body);
+    } catch {
+      rawText = response.body.toString("utf8");
+    }
+
+    const titleFromHtml = isHtml ? extractHtmlTitle(rawText) : "";
+    const content = isHtml ? htmlToText(rawText) : rawText.trim();
+    if (!content) throw new Error("В приложенном файле не найден текст статьи.");
+    if (content.length > MAX_ARTICLE_CHARS) {
+      throw new Error(`Текст статьи превышает лимит ${MAX_ARTICLE_CHARS.toLocaleString("ru-RU")} символов.`);
+    }
+
+    const filenameTitle = filename.replace(/\.(txt|md|markdown|html|htm)$/i, "").trim();
+    return { title: titleFromHtml || filenameTitle || titleFromText(content), content };
+  }
+
+  throw new Error("Не удалось загрузить приложенный файл.");
 }
 
 function decodeHtmlEntities(value: string): string {
@@ -207,14 +279,37 @@ function titleFromText(text: string): string {
   return text.split(/\r?\n/).map((line) => line.replace(/^#{1,6}\s*/, "").trim()).find(Boolean)?.slice(0, 200) ?? "Материал из MAX";
 }
 
-export async function prepareArticle(input: string): Promise<PreparedArticle> {
+export async function prepareArticle(input: string, attachment?: ArticleFileAttachment): Promise<PreparedArticle> {
   const raw = input.trim();
-  if (!raw) throw new Error("Добавьте ссылку или текст статьи после команды /kb.");
+  if (!raw && !attachment) throw new Error("Добавьте ссылку, текст статьи или текстовый файл после команды /kb.");
   if (raw.length > MAX_ARTICLE_CHARS) {
     throw new Error(`Текст статьи превышает лимит ${MAX_ARTICLE_CHARS.toLocaleString("ru-RU")} символов.`);
   }
 
   const linkMatch = raw.match(/^(https?:\/\/\S+)(?:\s+([\s\S]+))?$/i);
+  if (attachment) {
+    const article = await downloadArticleFile(attachment);
+    if (linkMatch) {
+      try {
+        const sourceUrl = new URL(linkMatch[1]);
+        if ((sourceUrl.protocol !== "http:" && sourceUrl.protocol !== "https:") || sourceUrl.username || sourceUrl.password) {
+          throw new Error();
+        }
+        article.sourceUrl = sourceUrl.toString();
+      } catch {
+        throw new Error("Не удалось разобрать ссылку на оригинал статьи.");
+      }
+      const notes = linkMatch[2]?.trim();
+      if (notes) article.content = `${article.content}\n\nПримечание пользователя:\n${notes}`;
+    } else if (raw) {
+      article.content = `${article.content}\n\nПримечание пользователя:\n${raw}`;
+    }
+    if (article.content.length > MAX_ARTICLE_CHARS) {
+      throw new Error(`Текст статьи превышает лимит ${MAX_ARTICLE_CHARS.toLocaleString("ru-RU")} символов.`);
+    }
+    return article;
+  }
+
   if (linkMatch) {
     let startUrl: URL;
     try {
