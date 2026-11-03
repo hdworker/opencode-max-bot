@@ -39,6 +39,7 @@ import { registerOpencodeStartCommand } from "../max/commands/opencode-start.js"
 import { registerOpencodeStopCommand } from "../max/commands/opencode-stop.js";
 import { registerOpenCommand, registerOpenCallback } from "../max/commands/open.js";
 import { registerLsCommand, registerLsCallback } from "../max/commands/ls.js";
+import { registerKnowledgeBaseCommand } from "../max/commands/kb.js";
 
 // Handler registrations
 import { registerPromptHandler } from "../max/handlers/prompt.js";
@@ -94,6 +95,7 @@ export async function startBotApp(): Promise<void> {
   registerProjectsCommand(bot);
   registerOpenCommand(bot);
   registerLsCommand(bot);
+  registerKnowledgeBaseCommand(bot);
   registerRenameCommand(bot);
   registerDetachCommand(bot);
   registerTtsCommand(bot);

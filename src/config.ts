@@ -15,6 +15,11 @@ export const config = {
     autoRestartEnabled: process.env.OPENCODE_AUTO_RESTART_ENABLED !== "false",
     monitorIntervalSec: Number(process.env.OPENCODE_MONITOR_INTERVAL_SEC) || 30,
   },
+  knowledgeBase: {
+    ingestUrl: process.env.KB_INGEST_URL || "http://127.0.0.1:8100/ingest",
+    ingestToken: process.env.KB_INGEST_TOKEN || "",
+    summarizeWithOpenCode: process.env.KB_SUMMARIZE_WITH_OPENCODE !== "false",
+  },
   server: {
     logLevel: (process.env.LOG_LEVEL || "info") as "debug" | "info" | "warn" | "error",
   },
