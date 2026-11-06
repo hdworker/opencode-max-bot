@@ -186,7 +186,11 @@ async function downloadArticleWithPlaywright(
 
   let browser;
   try {
-    browser = await chromium.launch({ headless: true, args: ["--disable-dev-shm-usage"] });
+    browser = await chromium.launch({
+      headless: true,
+      channel: "chromium",
+      args: ["--disable-dev-shm-usage"],
+    });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(`Не удалось запустить Chromium для загрузки Infostart: ${detail}`);
@@ -226,12 +230,9 @@ async function downloadArticleWithPlaywright(
 
     const response = await page.goto(startUrl.toString(), { waitUntil: "domcontentloaded" });
     if (!response) throw new Error("Chromium не получил ответ страницы Infostart.");
-    if (response.status() === 429) {
-      throw new Error(
-        "Infostart вернул HTTP 429 и при загрузке через Chromium с VPS. Доступ ограничен на стороне сайта; приложите файл статьи .txt, .md или .html.",
-      );
+    if (!response.ok() && response.status() !== 429) {
+      throw new Error(`Chromium получил от Infostart HTTP ${response.status()}.`);
     }
-    if (!response.ok()) throw new Error(`Chromium получил от Infostart HTTP ${response.status()}.`);
 
     const title = await page.title();
     const articleHtml = await page
@@ -253,6 +254,11 @@ async function downloadArticleWithPlaywright(
 
     const content = htmlToText(html);
     if (!content) throw new Error("Chromium не нашёл текст статьи на странице Infostart.");
+    if (response.status() === 429 && (!mainHtml || content.length < 1_000)) {
+      throw new Error(
+        "Infostart вернул HTTP 429 без текста статьи. Приложите сохранённую копию в формате .txt, .md или .html.",
+      );
+    }
     if (content.length > MAX_ARTICLE_CHARS) {
       throw new Error(`Текст статьи превышает лимит ${MAX_ARTICLE_CHARS.toLocaleString("ru-RU")} символов.`);
     }
