@@ -2,6 +2,7 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
+import { chromium } from "playwright";
 
 const MAX_ARTICLE_BYTES = 1_500_000;
 const MAX_ARTICLE_CHARS = 200_000;
@@ -40,6 +41,11 @@ function isPublicIpv4(address: string): boolean {
   if (a === 198 && b === 51 && c === 100) return false;
   if (a === 203 && b === 0 && c === 113) return false;
   return true;
+}
+
+function isInfostartHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/\.$/, "");
+  return normalized === "infostart.ru" || normalized.endsWith(".infostart.ru");
 }
 
 async function resolvePublicIpv4(url: URL): Promise<string> {
@@ -114,6 +120,8 @@ function downloadOnce(url: URL, address: string): Promise<DownloadedResponse> {
 }
 
 async function downloadArticle(startUrl: URL): Promise<{ title: string; content: string; sourceUrl: string }> {
+  if (isInfostartHost(startUrl.hostname)) return downloadArticleWithPlaywright(startUrl);
+
   let url = startUrl;
 
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
@@ -166,6 +174,103 @@ async function downloadArticle(startUrl: URL): Promise<{ title: string; content:
   }
 
   throw new Error("Не удалось загрузить статью.");
+}
+
+async function downloadArticleWithPlaywright(
+  startUrl: URL,
+): Promise<{ title: string; content: string; sourceUrl: string }> {
+  if (startUrl.protocol !== "https:" || !isInfostartHost(startUrl.hostname)) {
+    throw new Error("Загрузка через Chromium включена только для HTTPS-статей Infostart.");
+  }
+  await resolvePublicIpv4(startUrl);
+
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: true, args: ["--disable-dev-shm-usage"] });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Не удалось запустить Chromium для загрузки Infostart: ${detail}`);
+  }
+
+  try {
+    const context = await browser.newContext({ locale: "ru-RU" });
+    const page = await context.newPage();
+    page.setDefaultNavigationTimeout(REQUEST_TIMEOUT_MS);
+    const checkedHosts = new Map<string, Promise<string>>();
+
+    await page.route("**/*", async (route) => {
+      const requestUrl = new URL(route.request().url());
+      if (requestUrl.protocol !== "https:" || !isInfostartHost(requestUrl.hostname)) {
+        await route.abort();
+        return;
+      }
+
+      if (["image", "media", "font"].includes(route.request().resourceType())) {
+        await route.abort();
+        return;
+      }
+
+      try {
+        const key = requestUrl.host;
+        let resolved = checkedHosts.get(key);
+        if (!resolved) {
+          resolved = resolvePublicIpv4(requestUrl);
+          checkedHosts.set(key, resolved);
+        }
+        await resolved;
+        await route.continue();
+      } catch {
+        await route.abort();
+      }
+    });
+
+    const response = await page.goto(startUrl.toString(), { waitUntil: "domcontentloaded" });
+    if (!response) throw new Error("Chromium не получил ответ страницы Infostart.");
+    if (response.status() === 429) {
+      throw new Error(
+        "Infostart вернул HTTP 429 и при загрузке через Chromium с VPS. Доступ ограничен на стороне сайта; приложите файл статьи .txt, .md или .html.",
+      );
+    }
+    if (!response.ok()) throw new Error(`Chromium получил от Infostart HTTP ${response.status()}.`);
+
+    const title = await page.title();
+    const articleHtml = await page
+      .locator("article")
+      .first()
+      .evaluate((element) => element.outerHTML)
+      .catch(() => "");
+    const mainHtml =
+      articleHtml ||
+      (await page
+        .locator("main")
+        .first()
+        .evaluate((element) => element.outerHTML)
+        .catch(() => ""));
+    const html = mainHtml || await page.content();
+    if (Buffer.byteLength(html, "utf8") > MAX_ARTICLE_BYTES) {
+      throw new Error("Статья больше 1,5 МБ.");
+    }
+
+    const content = htmlToText(html);
+    if (!content) throw new Error("Chromium не нашёл текст статьи на странице Infostart.");
+    if (content.length > MAX_ARTICLE_CHARS) {
+      throw new Error(`Текст статьи превышает лимит ${MAX_ARTICLE_CHARS.toLocaleString("ru-RU")} символов.`);
+    }
+    if (
+      content.length < 150 &&
+      /captcha|access denied|checking your browser|проверка браузера/i.test(title)
+    ) {
+      throw new Error("Infostart показал проверочную страницу вместо текста статьи.");
+    }
+
+    return {
+      title: title || extractHtmlTitle(html) || titleFromText(content),
+      content,
+      sourceUrl: page.url(),
+    };
+  } finally {
+    await browser.close();
+  }
 }
 
 async function downloadArticleFile(attachment: ArticleFileAttachment): Promise<PreparedArticle> {
