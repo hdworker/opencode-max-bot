@@ -200,7 +200,6 @@ async function downloadArticleWithPlaywright(
     const context = await browser.newContext({ locale: "ru-RU" });
     const page = await context.newPage();
     page.setDefaultNavigationTimeout(REQUEST_TIMEOUT_MS);
-    const checkedHosts = new Map<string, Promise<string>>();
 
     await page.route("**/*", async (route) => {
       const requestUrl = new URL(route.request().url());
@@ -215,13 +214,7 @@ async function downloadArticleWithPlaywright(
       }
 
       try {
-        const key = requestUrl.host;
-        let resolved = checkedHosts.get(key);
-        if (!resolved) {
-          resolved = resolvePublicIpv4(requestUrl);
-          checkedHosts.set(key, resolved);
-        }
-        await resolved;
+        if (route.request().isNavigationRequest()) await resolvePublicIpv4(requestUrl);
         await route.continue();
       } catch {
         await route.abort();
@@ -236,25 +229,32 @@ async function downloadArticleWithPlaywright(
 
     const title = await page.title();
     const articleHtml = await page
-      .locator("article")
+      .locator('[itemprop="articleBody"]')
       .first()
       .evaluate((element) => element.outerHTML)
       .catch(() => "");
-    const mainHtml =
+    const selectedHtml =
       articleHtml ||
       (await page
-        .locator("main")
+        .locator("article, main")
         .first()
         .evaluate((element) => element.outerHTML)
         .catch(() => ""));
-    const html = mainHtml || await page.content();
+    let html = selectedHtml || (await page.content());
+    let content = htmlToText(html);
+    if (response.status() === 429 && content.length < 1_000 && selectedHtml) {
+      html = await page.content();
+      content = htmlToText(html);
+    }
     if (Buffer.byteLength(html, "utf8") > MAX_ARTICLE_BYTES) {
       throw new Error("Статья больше 1,5 МБ.");
     }
 
-    const content = htmlToText(html);
     if (!content) throw new Error("Chromium не нашёл текст статьи на странице Infostart.");
-    if (response.status() === 429 && (!mainHtml || content.length < 1_000)) {
+    if (
+      response.status() === 429 &&
+      (content.length < 1_000 || /^(429|too many requests|access denied|доступ ограничен)/i.test(title))
+    ) {
       throw new Error(
         "Infostart вернул HTTP 429 без текста статьи. Приложите сохранённую копию в формате .txt, .md или .html.",
       );
