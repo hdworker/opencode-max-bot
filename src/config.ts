@@ -17,6 +17,7 @@ export const config = {
   },
   knowledgeBase: {
     ingestUrl: process.env.KB_INGEST_URL || "http://127.0.0.1:8100/ingest",
+    listUrl: process.env.KB_LIST_URL || "http://127.0.0.1:8100/articles",
     ingestToken: process.env.KB_INGEST_TOKEN || "",
     summarizeWithOpenCode: process.env.KB_SUMMARIZE_WITH_OPENCODE !== "false",
   },

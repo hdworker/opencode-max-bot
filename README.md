@@ -158,6 +158,7 @@ src/
 | `OPENCODE_API_URL`              | URL OpenCode-сервера                               | `http://localhost:4096` |
 | `OPENCODE_PASSWORD`             | Пароль OpenCode-сервера (если задан)               | пусто                   |
 | `KB_INGEST_URL`                 | URL приёма статей                                  | `http://127.0.0.1:8100/ingest` |
+| `KB_LIST_URL`                   | URL списка материалов                               | `http://127.0.0.1:8100/articles` |
 | `KB_INGEST_TOKEN`               | Токен сервиса базы знаний                          | пусто                   |
 | `KB_SUMMARIZE_WITH_OPENCODE`    | Конспект статьи локальным OpenCode                 | `true`                 |
 | `OPENCODE_MODEL`                | Модель по умолчанию                                | пусто                   |
@@ -217,6 +218,10 @@ Chromium, извлекает HTML и просит локальный OpenCode п
 браузер командой `npx playwright install chromium`. Если суммаризация недоступна,
 сохраняется исходный текст. `KB_INGEST_TOKEN` должен совпадать с
 `ONEC_INGEST_TOKEN` сервиса.
+
+Команда `/kb list` выводит материалы, добавленные в базу из текущего чата,
+показывает до 10 последних записей. При необходимости URL списка задаётся через
+`KB_LIST_URL` (по умолчанию `http://127.0.0.1:8100/articles`).
 
 ```bash
 npm run build    # сборка TypeScript

@@ -1,16 +1,44 @@
 import type { MaxBot } from "../bot.js";
 import { logger } from "../../utils/logger.js";
 import { config } from "../../config.js";
-import { ingestArticleFromMax } from "../../kb/article-processor.js";
+import { ingestArticleFromMax, listArticlesFromMax } from "../../kb/article-processor.js";
 import type { ArticleFileAttachment } from "../../kb/article-input.js";
 import type { MaxMessage } from "../client.js";
 
 export function registerKnowledgeBaseCommand(bot: MaxBot): void {
-  bot.command("kb", "Add an article to the knowledge base", async (_userId, chatId, _text, args, message) => {
+  bot.command("kb", "Add an article or list chat materials", async (_userId, chatId, _text, args, message) => {
     if (!config.knowledgeBase.ingestToken) {
       await bot.sendMessage(chatId, {
         text: "❌ Приём статей не настроен: задайте KB_INGEST_TOKEN для бота.",
       });
+      return;
+    }
+
+    if (["list", "список"].includes(args.trim().toLowerCase())) {
+      try {
+        const result = await listArticlesFromMax(chatId);
+        if (result.total === 0) {
+          await bot.sendMessage(chatId, { text: "📚 В этом чате пока нет добавленных материалов." });
+          return;
+        }
+        const lines = result.articles.map((article, index) => {
+          const date = article.added_at ? new Date(article.added_at).toLocaleDateString("ru-RU") : "";
+          const title = article.title.length > 100 ? `${article.title.slice(0, 97)}…` : article.title;
+          const source = article.source_url.length > 150
+            ? `${article.source_url.slice(0, 147)}…`
+            : article.source_url;
+          return `${index + 1}. ${title}${date ? ` · ${date}` : ""}${source ? `\n   ${source}` : ""}`;
+        });
+        const more = result.total > result.articles.length
+          ? `\n\nПоказаны последние ${result.articles.length} из ${result.total}.`
+          : "";
+        await bot.sendMessage(chatId, {
+          text: `📚 Материалы этого чата (${result.total}):\n\n${lines.join("\n\n")}${more}`,
+        });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Неизвестная ошибка";
+        await bot.sendMessage(chatId, { text: `❌ Не удалось получить список материалов.\n${detail}` });
+      }
       return;
     }
 
