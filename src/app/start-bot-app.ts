@@ -40,6 +40,7 @@ import { registerOpencodeStopCommand } from "../max/commands/opencode-stop.js";
 import { registerOpenCommand, registerOpenCallback } from "../max/commands/open.js";
 import { registerLsCommand, registerLsCallback } from "../max/commands/ls.js";
 import { registerKnowledgeBaseCommand } from "../max/commands/kb.js";
+import { registerVpnCommand } from "../max/commands/vpn.js";
 
 // Handler registrations
 import { registerPromptHandler } from "../max/handlers/prompt.js";
@@ -96,6 +97,7 @@ export async function startBotApp(): Promise<void> {
   registerOpenCommand(bot);
   registerLsCommand(bot);
   registerKnowledgeBaseCommand(bot);
+  registerVpnCommand(bot);
   registerRenameCommand(bot);
   registerDetachCommand(bot);
   registerTtsCommand(bot);

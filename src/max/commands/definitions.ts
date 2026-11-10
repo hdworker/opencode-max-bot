@@ -15,6 +15,7 @@ export const COMMAND_DEFINITIONS: BotCommandDefinition[] = [
   { command: "open", descriptionKey: "cmd.description.open" },
   { command: "ls", descriptionKey: "cmd.description.ls" },
   { command: "kb", descriptionKey: "cmd.description.kb" },
+  { command: "vpn", descriptionKey: "cmd.description.vpn" },
   { command: "rename", descriptionKey: "cmd.description.rename" },
   { command: "opencode_start", descriptionKey: "cmd.description.opencode_start" },
   { command: "opencode_stop", descriptionKey: "cmd.description.opencode_stop" },
