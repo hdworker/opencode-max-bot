@@ -5,6 +5,18 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
+import {
+  applyVpnRescanResults,
+  filterPreviouslyIssuedConfigs,
+  getVpnIssuedRecords,
+  recoverLegacyVpnConfigs,
+  rememberVpnConfig,
+  vpnConfigIdentity,
+  type LegacyVpnIssuedRef,
+  type VpnCheckOutcome,
+  type VpnIssuedConfigRecord,
+  type VpnRescanUpdate,
+} from "./issued-store.js";
 
 const FETCH_TIMEOUT_MS = 30_000;
 const README_TIMEOUT_MS = 15_000;
@@ -58,6 +70,7 @@ export interface VpnProfileDiagnostic {
   profile: VpnProfile;
   status: "pending" | "running" | "completed" | "failed" | "timed_out";
   candidateCount: number;
+  skippedPreviouslyIssued: number;
   testedCount: number;
   passedCount: number;
   semiPassedCount: number;
@@ -132,7 +145,22 @@ interface XrayResultRecord extends Record<string, unknown> {
 
 interface XrayRunResult {
   config: string | null;
+  results: Map<string, VpnCheckOutcome>;
   diagnostics: VpnProfileDiagnostic;
+}
+
+export interface VpnRescanProfileResult {
+  profile: VpnProfile;
+  requestedCount: number;
+  testedCount: number;
+  passedCount: number;
+  removedCount: number;
+  untestedCount: number;
+  diagnostics: VpnProfileDiagnostic;
+}
+
+export interface VpnRescanResult {
+  profiles: VpnRescanProfileResult[];
 }
 
 let searchRunning = false;
@@ -152,9 +180,31 @@ export async function getVpnDiagnostics(): Promise<VpnDiagnostics | null> {
   return currentDiagnostics ? cloneDiagnostics(currentDiagnostics) : null;
 }
 
-export async function searchForVpnConfigs(
-  profiles: VpnProfile[],
-): Promise<VpnSearchResult> {
+export async function getVpnIssuedConfigs(
+  profiles?: VpnProfile[],
+): Promise<VpnIssuedConfigRecord[]> {
+  await loadPersistedDiagnostics();
+  const records = await getVpnIssuedRecords(getLegacyIssuedRefs());
+  return records.filter(
+    (record) =>
+      (record.state === "active" || record.state === "unavailable") &&
+      (!profiles || profiles.includes(record.profile)),
+  );
+}
+
+export async function recoverLegacyIssuedConfigs(): Promise<{
+  attempted: number;
+  recovered: number;
+}> {
+  const records = await getVpnIssuedConfigs();
+  const attempted = records.filter((record) => record.state === "unavailable").length;
+  if (attempted === 0) return { attempted: 0, recovered: 0 };
+  const configs = await downloadConfigLinks();
+  const recovered = await recoverLegacyVpnConfigs(configs);
+  return { attempted, recovered };
+}
+
+export async function searchForVpnConfigs(profiles: VpnProfile[]): Promise<VpnSearchResult> {
   await loadPersistedDiagnostics();
   if (searchRunning) {
     throw new VpnSearchAlreadyRunningError();
@@ -162,15 +212,82 @@ export async function searchForVpnConfigs(
 
   searchRunning = true;
   try {
+    await getVpnIssuedRecords(getLegacyIssuedRefs());
     return await findVpnConfigs(profiles);
   } finally {
     searchRunning = false;
   }
 }
 
-async function findVpnConfigs(
-  profiles: VpnProfile[],
-): Promise<VpnSearchResult> {
+export async function rescanIssuedVpnConfigs(profiles: VpnProfile[]): Promise<VpnRescanResult> {
+  await loadPersistedDiagnostics();
+  if (searchRunning) throw new VpnSearchAlreadyRunningError();
+  searchRunning = true;
+  try {
+    const records = await getVpnIssuedRecords(getLegacyIssuedRefs());
+    const reportId = createHash("sha256")
+      .update(Date.now() + ":" + process.pid + ":rescan")
+      .digest("hex")
+      .slice(0, 12);
+    const results: VpnRescanProfileResult[] = [];
+
+    for (const profile of profiles) {
+      const active = records.filter(
+        (record) => record.profile === profile && record.state === "active" && record.config,
+      );
+      if (active.length === 0) continue;
+
+      const profileStats: VpnProfileDiagnostic = {
+        profile,
+        status: "running",
+        candidateCount: active.length,
+        skippedPreviouslyIssued: 0,
+        testedCount: 0,
+        passedCount: 0,
+        semiPassedCount: 0,
+        failedCount: 0,
+        unparsedResultCount: 0,
+        maxPassed: 0,
+        durationMs: 0,
+        failureKinds: {},
+        endpoints: {},
+      };
+      const run = await runXrayKnife(
+        active.map((record) => record.config!),
+        PROFILE_TEST_URLS[profile],
+        profileStats,
+        reportId,
+        () => undefined,
+        0,
+        true,
+      );
+      const checkedAt = new Date().toISOString();
+      let prune = { passed: 0, removed: 0, untested: active.length };
+      if (run.diagnostics.status === "completed") {
+        const updates: VpnRescanUpdate[] = [...run.results].map(([identity, outcome]) => ({
+          identity,
+          outcome,
+        }));
+        prune = await applyVpnRescanResults(profile, updates, checkedAt);
+      }
+
+      results.push({
+        profile,
+        requestedCount: active.length,
+        testedCount: run.diagnostics.testedCount,
+        passedCount: prune.passed,
+        removedCount: prune.removed,
+        untestedCount: prune.untested,
+        diagnostics: run.diagnostics,
+      });
+    }
+    return { profiles: results };
+  } finally {
+    searchRunning = false;
+  }
+}
+
+async function findVpnConfigs(profiles: VpnProfile[]): Promise<VpnSearchResult> {
   const startedAt = new Date().toISOString();
   const previousIssued = currentDiagnostics?.lastIssued ?? [];
   const report: VpnDiagnostics = {
@@ -205,7 +322,6 @@ async function findVpnConfigs(
       lastPersistedAt = now;
       void persistDiagnostics(report);
     }
-
   };
 
   logger.info("[VPN] Search started.", {
@@ -317,11 +433,14 @@ async function findVpnConfigs(
 
     report.phase = "profile-check";
     for (const profile of profiles) {
+      const issuedRecords = await getVpnIssuedRecords(getLegacyIssuedRefs());
+      const unissued = filterPreviouslyIssuedConfigs(configs, issuedRecords);
       report.activeProfile = profile;
       const profileReport: VpnProfileDiagnostic = {
         profile,
         status: "running",
-        candidateCount: configs.length,
+        candidateCount: unissued.configs.length,
+        skippedPreviouslyIssued: unissued.skipped,
         testedCount: 0,
         passedCount: 0,
         semiPassedCount: 0,
@@ -335,17 +454,49 @@ async function findVpnConfigs(
       report.profiles[profile] = profileReport;
       publish(true);
 
-      const result = await runXrayKnife(
-        configs,
-        PROFILE_TEST_URLS[profile],
-        profileReport,
-        report.runId,
-        publish,
-      );
-      configsByProfile[profile] = result.config;
+      const result =
+        unissued.configs.length > 0
+          ? await runXrayKnife(
+              unissued.configs,
+              PROFILE_TEST_URLS[profile],
+              profileReport,
+              report.runId,
+              publish,
+            )
+          : {
+              config: null,
+              results: new Map<string, VpnCheckOutcome>(),
+              diagnostics: {
+                ...profileReport,
+                status: "completed" as const,
+                error: unissued.skipped > 0 ? "all-candidates-already-issued" : undefined,
+              },
+            };
+      let configToIssue = result.config;
+      if (configToIssue && result.diagnostics.firstPassed) {
+        try {
+          const remembered = await rememberVpnConfig(profile, configToIssue, {
+            issuedAt: new Date().toISOString(),
+            exitIp: result.diagnostics.firstPassed.exitIp,
+            country: result.diagnostics.firstPassed.country,
+            delayMs: result.diagnostics.firstPassed.delayMs,
+          });
+          if (!remembered) configToIssue = null;
+        } catch (error) {
+          logger.error("[VPN] Could not persist issued config; suppressing delivery.", {
+            runId: report.runId,
+            profile,
+            error: error instanceof Error ? error.name : "store-error",
+          });
+          configToIssue = null;
+          result.diagnostics.status = "failed";
+          result.diagnostics.error = "issued-config-store-error";
+        }
+      }
+      configsByProfile[profile] = configToIssue;
       report.profiles[profile] = result.diagnostics;
 
-      if (result.config && result.diagnostics.firstPassed) {
+      if (configToIssue && result.diagnostics.firstPassed) {
         report.lastIssued.push({
           id: result.diagnostics.firstPassed.id,
           profile,
@@ -483,6 +634,25 @@ function parseConfigLinks(source: string): string[] {
   return links;
 }
 
+async function downloadConfigLinks(): Promise<string[]> {
+  const downloads = await Promise.allSettled(
+    config.vpn.sourceUrls.map((sourceUrl) =>
+      downloadSource(sourceUrl, undefined, Date.now()).then((result) => result.text),
+    ),
+  );
+  const unique = new Set<string>();
+  for (const download of downloads) {
+    if (download.status !== "fulfilled") continue;
+    for (const link of parseConfigLinks(download.value)) {
+      unique.add(link);
+      if (unique.size >= MAX_CONFIGS) return [...unique];
+    }
+  }
+  if (unique.size === 0)
+    throw new Error("No source configs were available to recover old VPN results.");
+  return [...unique];
+}
+
 async function fetchGoidaFileUpdateTimes(): Promise<{
   timestamps: Map<string, string>;
   error?: string;
@@ -535,8 +705,7 @@ function isGoidaSource(sourceUrl: string): boolean {
   try {
     const parsed = new URL(sourceUrl);
     return (
-      (parsed.hostname === "raw.githubusercontent.com" ||
-        parsed.hostname === "github.com") &&
+      (parsed.hostname === "raw.githubusercontent.com" || parsed.hostname === "github.com") &&
       parsed.pathname.includes("/aneek0/goida-vpn-configs/")
     );
   } catch {
@@ -577,6 +746,8 @@ function runXrayKnife(
   profileStats: VpnProfileDiagnostic,
   runId: string,
   publish: (force?: boolean) => void,
+  maxPassed = 1,
+  testExactLinks = false,
 ): Promise<XrayRunResult> {
   const args = [
     "http",
@@ -596,16 +767,18 @@ function runXrayKnife(
     "--url-success-threshold",
     "1",
     "--max-passed",
-    "1",
+    String(maxPassed),
     "--out",
     "-",
     "--type",
     "jsonl",
     "--quiet",
   ];
+  if (testExactLinks) args.push("--dedup-semantic=false");
 
   const startedAt = Date.now();
   return new Promise((resolve) => {
+    const results = new Map<string, VpnCheckOutcome>();
     let child: ChildProcessWithoutNullStreams;
     try {
       child = spawn(config.vpn.checkerPath, args, {
@@ -615,7 +788,7 @@ function runXrayKnife(
     } catch {
       profileStats.status = "failed";
       profileStats.error = "checker-start-error";
-      resolve({ config: null, diagnostics: profileStats });
+      resolve({ config: null, results, diagnostics: profileStats });
       return;
     }
 
@@ -651,9 +824,8 @@ function runXrayKnife(
         profileStats.error = "xray-jsonl-line-too-large";
       } else if (spawnError) {
         profileStats.status = "failed";
-        profileStats.error = spawnError.code === "ENOENT"
-          ? "checker-not-installed"
-          : "checker-start-error";
+        profileStats.error =
+          spawnError.code === "ENOENT" ? "checker-not-installed" : "checker-start-error";
       } else if (code !== 0 && code !== 3) {
         profileStats.status = "failed";
         profileStats.error = "xray-exit-" + String(code ?? "unknown");
@@ -683,7 +855,7 @@ function runXrayKnife(
         error: profileStats.error,
       });
       publish(true);
-      resolve({ config: firstConfig, diagnostics: profileStats });
+      resolve({ config: firstConfig, results, diagnostics: profileStats });
     };
 
     const consumeJsonlLine = (rawLine: string): void => {
@@ -706,6 +878,15 @@ function runXrayKnife(
 
       profileStats.testedCount++;
       const status = String(record.status ?? "failed").toLowerCase();
+      const link = typeof record.link === "string" ? record.link : "";
+      const hasLink = link && /^[a-z][a-z0-9+.-]*:\/\/\S+$/i.test(link);
+      const outcome: VpnCheckOutcome =
+        status === "passed"
+          ? "passed"
+          : status === "semi-passed" || status === "semi_passed"
+            ? "semi-passed"
+            : "failed";
+      if (hasLink) results.set(vpnConfigIdentity(link), outcome);
       if (status === "passed") {
         profileStats.passedCount++;
       } else if (status === "semi-passed" || status === "semi_passed") {
@@ -742,27 +923,29 @@ function runXrayKnife(
       }
 
       if (status === "passed" && !profileStats.firstPassed) {
-        const link = typeof record.link === "string" ? record.link : "";
         const endpointCount = Number(record.totalCount) || endpoints.length;
-        const successCount = Number(record.successCount) || endpoints.filter(
-          (endpoint) =>
-            endpoint &&
-            typeof endpoint === "object" &&
-            ["success", "passed", "ok"].includes(
-              String((endpoint as Record<string, unknown>).outcome ?? "").toLowerCase(),
-            ),
-        ).length;
+        const successCount =
+          Number(record.successCount) ||
+          endpoints.filter(
+            (endpoint) =>
+              endpoint &&
+              typeof endpoint === "object" &&
+              ["success", "passed", "ok"].includes(
+                String((endpoint as Record<string, unknown>).outcome ?? "").toLowerCase(),
+              ),
+          ).length;
         profileStats.firstPassed = {
-          id: link ? configFingerprint(link) : "unknown",
+          id: hasLink ? configFingerprint(link) : "unknown",
           exitIp: normalizeOptionalString(record.ip),
           country: normalizeOptionalString(record.location),
-          delayMs: Number.isFinite(Number(record.delay)) && Number(record.delay) >= 0
-            ? Number(record.delay)
-            : undefined,
+          delayMs:
+            Number.isFinite(Number(record.delay)) && Number(record.delay) >= 0
+              ? Number(record.delay)
+              : undefined,
           succeededEndpoints: successCount,
           totalEndpoints: endpointCount,
         };
-        if (link && /^[a-z][a-z0-9+.-]*:\/\/\S+$/i.test(link)) {
+        if (hasLink) {
           firstConfig = link;
         }
       }
@@ -774,7 +957,10 @@ function runXrayKnife(
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
       stdoutBuffer += chunk;
-      if (Buffer.byteLength(stdoutBuffer, "utf8") > MAX_JSONL_LINE_BYTES && !stdoutBuffer.includes("\n")) {
+      if (
+        Buffer.byteLength(stdoutBuffer, "utf8") > MAX_JSONL_LINE_BYTES &&
+        !stdoutBuffer.includes("\n")
+      ) {
         lineTooLarge = true;
         child.kill("SIGTERM");
         forceKillTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
@@ -827,7 +1013,13 @@ function getEndpointLabel(endpoint: Record<string, unknown>): string {
 
 function normalizeFailureKind(value: unknown): string {
   if (typeof value !== "string" || !value.trim()) return "unknown";
-  return value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 48) || "unknown";
+  return (
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, "")
+      .slice(0, 48) || "unknown"
+  );
 }
 
 function normalizeOptionalString(value: unknown): string | undefined {
@@ -837,6 +1029,17 @@ function normalizeOptionalString(value: unknown): string | undefined {
 
 function configFingerprint(value: string): string {
   return createHash("sha256").update(value).digest("hex").slice(0, 12);
+}
+
+function getLegacyIssuedRefs(): LegacyVpnIssuedRef[] {
+  return (currentDiagnostics?.lastIssued ?? []).map((entry) => ({
+    id: entry.id,
+    profile: entry.profile,
+    issuedAt: entry.issuedAt,
+    exitIp: entry.exitIp,
+    country: entry.country,
+    delayMs: entry.delayMs,
+  }));
 }
 
 function cloneDiagnostics(report: VpnDiagnostics): VpnDiagnostics {

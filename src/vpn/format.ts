@@ -15,6 +15,9 @@ export function formatVpnProfileStatistics(
     "Проверено " + stats.testedCount + "/" + stats.candidateCount + " конфигов",
     "прошло " + stats.passedCount,
   ];
+  if (stats.skippedPreviouslyIssued > 0) {
+    parts.push("ранее выданных пропущено " + stats.skippedPreviouslyIssued);
+  }
   if (stats.semiPassedCount > 0) parts.push("частично прошло " + stats.semiPassedCount);
   if (stats.failedCount > 0) parts.push("не прошло " + stats.failedCount);
   if (stats.maxPassed === 0) parts.push("полный прогон");
